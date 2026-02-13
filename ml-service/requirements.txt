@@ -14,3 +14,8 @@ python-dotenv
 cloudinary
 moviepy
 yt-dlp
+beautifulsoup4
+playwright
+html2text
+fpdf2
+python-docx

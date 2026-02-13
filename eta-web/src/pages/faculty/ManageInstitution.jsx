@@ -15,6 +15,7 @@ import EditCourseModal from '../../components/faculty/EditCourseModal';
 import CourseCard from '../../components/faculty/CourseCard';
 import QRCodeModal from '../../components/faculty/QRCodeModal';
 import Loader from '../../components/Loader';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function ManageInstitution() {
     const { institutionId } = useParams();
@@ -174,10 +175,13 @@ export default function ManageInstitution() {
                                 </div>
                             </div>
                         </div>
-                        <button className="btn-secondary flex items-center gap-2">
-                            <Settings className="w-4 h-4" />
-                            Settings
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <ThemeToggle />
+                            <button className="btn-secondary flex items-center gap-2">
+                                <Settings className="w-4 h-4" />
+                                Settings
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

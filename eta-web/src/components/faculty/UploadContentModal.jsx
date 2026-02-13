@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Upload, FileText, Video, Image, File, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, Upload, FileText, Video, Image, File, Loader2, CheckCircle, AlertCircle, Link as LinkIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import apiClient from '../../api/axios.config';
 
@@ -31,8 +31,9 @@ const CATEGORIES = [
 ];
 
 export default function UploadContentModal({ isOpen, onClose, onSuccess, courseId, courseName }) {
-    const [activeTab, setActiveTab] = useState('file'); // 'file' or 'youtube'
+    const [activeTab, setActiveTab] = useState('file'); // 'file', 'youtube', or 'web'
     const [youtubeUrl, setYoutubeUrl] = useState('');
+    const [webUrl, setWebUrl] = useState('');
     const [uploading, setUploading] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
@@ -143,6 +144,11 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
             return;
         }
 
+        if (activeTab === 'web' && !webUrl) {
+            toast.error('Please enter a website URL');
+            return;
+        }
+
         if (!formData.title) {
             toast.error('Please enter a title');
             return;
@@ -182,7 +188,7 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                         setUploadProgress(progress);
                     }
                 });
-            } else {
+            } else if (activeTab === 'youtube') {
                 // YouTube Link
                 const youtubeData = {
                     courseId,
@@ -198,6 +204,22 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                 };
 
                 response = await apiClient.post('/content/youtube', youtubeData);
+            } else if (activeTab === 'web') {
+                // Web Link
+                const webData = {
+                    courseId,
+                    url: webUrl,
+                    title: formData.title,
+                    description: formData.description,
+                    difficulty: formData.difficulty,
+                    category: formData.category,
+                    tags: formData.tags
+                        .split(',')
+                        .map(tag => tag.trim())
+                        .filter(tag => tag.length > 0)
+                };
+
+                response = await apiClient.post('/content/web', webData);
             }
 
             setUploading(false);
@@ -225,6 +247,7 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
         setThumbnailFile(null);
         setThumbnailPreview(null);
         setYoutubeUrl('');
+        setWebUrl('');
         setUploadProgress(0);
         setFormData({
             title: '',
@@ -237,7 +260,7 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
 
     if (!isOpen) return null;
 
-    const FileIcon = activeTab === 'file' && selectedFile ? FILE_TYPE_ICONS[getFileType(selectedFile)] : (activeTab === 'youtube' ? Video : Upload);
+    const FileIcon = activeTab === 'file' && selectedFile ? FILE_TYPE_ICONS[getFileType(selectedFile)] : (activeTab === 'youtube' ? Video : (activeTab === 'web' ? LinkIcon : Upload));
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -286,6 +309,14 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                                 }`}
                         >
                             YouTube Link
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('web')}
+                            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${activeTab === 'web' ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground hover:text-primary'
+                                }`}
+                        >
+                            Web Link
                         </button>
                     </div>
                 </div>
@@ -349,7 +380,7 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                                 )}
                             </div>
                         </div>
-                    ) : (
+                    ) : activeTab === 'youtube' ? (
                         <div>
                             <label className="block text-sm font-medium mb-2">
                                 YouTube Video URL <span className="text-red-500">*</span>
@@ -369,7 +400,27 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                                 For YouTube videos, the default thumbnail will be used automatically.
                             </p>
                         </div>
-                    )}
+                    ) : activeTab === 'web' ? (
+                        <div>
+                            <label className="block text-sm font-medium mb-2">
+                                Website URL <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                                <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                <input
+                                    type="url"
+                                    value={webUrl}
+                                    onChange={(e) => setWebUrl(e.target.value)}
+                                    className="input w-full pl-10"
+                                    placeholder="https://example.com/article"
+                                    disabled={uploading || processing}
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">
+                                Our AI will scrape the page content, simplify it for students, and automatically generate a thumbnail.
+                            </p>
+                        </div>
+                    ) : null}
 
                     {/* Thumbnail Option for Videos */}
                     {activeTab === 'file' && selectedFile && getFileType(selectedFile) === 'video' && (
@@ -537,7 +588,7 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                         <button
                             type="submit"
                             className="btn-primary flex-1 flex items-center justify-center gap-2"
-                            disabled={uploading || processing || (activeTab === 'file' ? !selectedFile : !youtubeUrl)}
+                            disabled={uploading || processing || (activeTab === 'file' ? !selectedFile : activeTab === 'youtube' ? !youtubeUrl : !webUrl)}
                         >
                             {uploading ? (
                                 <>
@@ -551,14 +602,14 @@ export default function UploadContentModal({ isOpen, onClose, onSuccess, courseI
                                 </>
                             ) : (
                                 <>
-                                    {activeTab === 'file' ? <Upload className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-                                    {activeTab === 'file' ? 'Upload Content' : 'Add YouTube Video'}
+                                    {activeTab === 'file' ? <Upload className="w-4 h-4" /> : activeTab === 'youtube' ? <Video className="w-4 h-4" /> : <LinkIcon className="w-4 h-4" />}
+                                    {activeTab === 'file' ? 'Upload Content' : activeTab === 'youtube' ? 'Add YouTube Video' : 'Add Web Resource'}
                                 </>
                             )}
                         </button>
                     </div>
                 </form>
             </motion.div>
-        </div>
+        </div >
     );
 }

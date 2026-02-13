@@ -4,7 +4,11 @@ import { requireFaculty } from '../middleware/role.middleware.js';
 import Course from '../models/Course.model.js';
 import Branch from '../models/Branch.model.js';
 import Institution from '../models/Institution.model.js';
+import Content from '../models/Content.model.js';
+import Doubt from '../models/Doubt.model.js';
 import { runNeo4jQuery } from '../config/neo4j.config.js';
+import { deleteFromCloudinary } from '../config/cloudinary.config.js';
+import { deleteContentNode } from '../services/graph/content.graph.js';
 
 const router = express.Router();
 
@@ -304,25 +308,56 @@ router.delete('/:id', authenticate, attachUser, requireFaculty, async (req, res)
             });
         }
 
-        // Soft delete
-        course.isActive = false;
-        await course.save();
+        // 1. Find all content related to this course
+        const contents = await Content.find({ courseId: course._id });
 
-        // Update branch stats
+        // 2. Delete each content (Files + Graph + DB)
+        for (const content of contents) {
+            // Delete files from Cloudinary
+            if (content.file && content.file.publicId) {
+                await deleteFromCloudinary(content.file.publicId).catch(err => console.error('Cloudinary file delete error:', err));
+            }
+            if (content.file && content.file.thumbnail && content.file.thumbnail.publicId) {
+                await deleteFromCloudinary(content.file.thumbnail.publicId).catch(err => console.error('Cloudinary thumbnail delete error:', err));
+            }
+            // Delete Word document from Cloudinary if it exists (for web content)
+            if (content.extractedData?.metadata?.docxPublicId) {
+                await deleteFromCloudinary(content.extractedData.metadata.docxPublicId).catch(err => console.error('Cloudinary docx delete error:', err));
+            }
+            // Delete from Neo4j
+            await deleteContentNode(content._id).catch(err => console.error('Neo4j content delete error:', err));
+
+            // Delete associated Doubts
+            await Doubt.deleteMany({ contentId: content._id });
+        }
+
+        // 3. Delete all content records from MongoDB
+        await Content.deleteMany({ courseId: course._id });
+
+        // 4. Update branch stats (decrement both courses and content)
+        const totalContentCount = contents.length;
         await Branch.updateMany(
             { _id: { $in: course.branchIds } },
-            { $inc: { 'stats.totalCourses': -1 } }
+            {
+                $inc: {
+                    'stats.totalCourses': -1,
+                    'stats.totalContent': -totalContentCount
+                }
+            }
         );
 
-        // Delete from Neo4j
+        // 5. Delete Course from Neo4j
         await runNeo4jQuery(
             `MATCH (c:Course {id: $id}) DETACH DELETE c`,
             { id: course._id.toString() }
         );
 
+        // 6. Hard delete Course from MongoDB
+        await Course.findByIdAndDelete(course._id);
+
         res.json({
             success: true,
-            message: 'Course deleted successfully'
+            message: 'Course and all related resources deleted successfully'
         });
     } catch (error) {
         console.error('Delete course error:', error);

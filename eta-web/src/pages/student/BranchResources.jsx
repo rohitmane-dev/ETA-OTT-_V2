@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import apiClient from '../../api/axios.config';
 import Loader from '../../components/Loader';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function BranchResources() {
     const { branchId } = useParams();
@@ -94,6 +95,7 @@ export default function BranchResources() {
                             </p>
                         </div>
                     </div>
+                    <ThemeToggle />
                 </div>
             </div>
 

@@ -13,6 +13,7 @@ import ContentViewer from '../../components/faculty/ContentViewer';
 import CourseKnowledgeGraph from '../../components/faculty/CourseKnowledgeGraph';
 import { Network } from 'lucide-react';
 import Loader from '../../components/Loader';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function ManageCourseContent() {
     const { courseId } = useParams();
@@ -241,6 +242,7 @@ export default function ManageCourseContent() {
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
+                            <ThemeToggle />
                             <button
                                 onClick={() => setShowGraph(true)}
                                 className="btn-secondary flex items-center gap-2"

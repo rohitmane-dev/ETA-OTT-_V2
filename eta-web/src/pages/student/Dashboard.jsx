@@ -16,6 +16,7 @@ import StudentDoubtManager from '../../components/student/StudentDoubtManager';
 import Loader from '../../components/Loader';
 import ContentViewer from '../../components/faculty/ContentViewer';
 import ExtractedInfoModal from '../../components/faculty/ExtractedInfoModal';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function StudentDashboard() {
     const navigate = useNavigate();
@@ -192,6 +193,7 @@ export default function StudentDashboard() {
                         </div>
 
                         <div className="flex items-center gap-3">
+                            <ThemeToggle />
                             <div className="relative hidden md:block">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                                 <input type="text" placeholder="Search courses..." className="input pl-10 w-64 bg-secondary/50 border-none focus:ring-1 focus:ring-primary/30" />

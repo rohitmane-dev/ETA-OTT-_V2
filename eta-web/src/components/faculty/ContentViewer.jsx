@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     X, Download, Share2, Maximize2, Minimize2,
     FileText, Video, Info, BarChart3, List, MessageCircle,
-    ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Eye, Pencil, Play
+    ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Eye, Pencil, Play, ExternalLink, Globe
 } from 'lucide-react';
 import ReactPlayer from 'react-player';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -40,13 +40,23 @@ export default function ContentViewer({ isOpen, onClose, content }) {
 
     const pdfFile = useMemo(() => {
         if (!content?.file?.url) return null;
-        return {
-            url: `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/content/view/proxy?url=${encodeURIComponent(content.file.url)}`,
-            httpHeaders: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        };
-    }, [content?.file?.url]);
+
+        // If it's web content but not yet a PDF, don't try to load it in the PDF viewer
+        if (content.type === 'web' && content.file.format !== 'pdf') return null;
+
+        const isCloudinary = content.file.url.includes('cloudinary.com');
+
+        if (isCloudinary) {
+            return {
+                url: `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/content/view/proxy?url=${encodeURIComponent(content.file.url)}`,
+                httpHeaders: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            };
+        }
+
+        return content.file.url;
+    }, [content?.file?.url, content?.type, content?.file?.format]);
 
     if (!isOpen || !content) return null;
 
@@ -125,7 +135,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
     };
 
     const extractTextFromArea = (box) => {
-        if (!box || content.type !== 'pdf' || !viewerRef.current) return '';
+        if (!box || (content.type !== 'pdf' && content.type !== 'web') || !viewerRef.current) return '';
         const textElements = document.querySelectorAll('.react-pdf__Page__textContent span');
         let extractedText = [];
         const vRect = viewerRef.current.getBoundingClientRect();
@@ -150,7 +160,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
     const handleMouseUp = () => {
         if (isDrawing || isMoving || isResizing) {
             if (selectionBox?.width > 10 && selectionBox?.height > 10) {
-                if (content.type === 'pdf') {
+                if (content.type === 'pdf' || content.type === 'web') {
                     const txt = extractTextFromArea(selectionBox);
                     setSelection(txt || '(Visual Scan - AI Analysis)');
                 } else if (content.type === 'image') {
@@ -344,6 +354,211 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                         )}
                     </div>
                 );
+            case 'web':
+                if (content.file.format === 'pdf') {
+                    // Reuse PDF viewer for converted web content
+                    return (
+                        <div className="flex flex-col items-center bg-gray-100 dark:bg-gray-900 overflow-auto p-4 min-h-[500px] w-full custom-scrollbar">
+                            <div className="sticky top-0 z-20 flex flex-wrap justify-center items-center gap-2 mb-4 bg-card/80 backdrop-blur p-2 rounded-lg shadow-sm w-full max-w-3xl">
+                                {!isScrollMode && (
+                                    <>
+                                        <button onClick={() => setPageNumber(Math.max(1, pageNumber - 1))} disabled={pageNumber <= 1} className="p-2 hover:bg-secondary rounded disabled:opacity-50">
+                                            <ChevronLeft className="w-5 h-5" />
+                                        </button>
+                                        <span className="text-sm font-medium min-w-[100px] text-center">
+                                            Page {pageNumber} of {numPages || '?'}
+                                        </span>
+                                        <button onClick={() => setPageNumber(Math.min(numPages || pageNumber, pageNumber + 1))} disabled={numPages && pageNumber >= numPages} className="p-2 hover:bg-secondary rounded disabled:opacity-50">
+                                            <ChevronRight className="w-5 h-5" />
+                                        </button>
+                                    </>
+                                )}
+                                <div className="w-px h-6 bg-border mx-2" />
+                                <div className="flex items-center gap-1 bg-secondary/30 p-1 rounded-lg">
+                                    <button onClick={() => setScale(s => Math.max(0.5, s - 0.1))} className="p-1.5 hover:bg-secondary rounded"><ZoomOut className="w-4 h-4" /></button>
+                                    <span className="text-xs font-bold w-12 text-center">{Math.round(scale * 100)}%</span>
+                                    <button onClick={() => setScale(s => Math.min(2, s + 0.1))} className="p-1.5 hover:bg-secondary rounded"><ZoomIn className="w-4 h-4" /></button>
+                                </div>
+                                <div className="w-px h-6 bg-border mx-2" />
+                                <button
+                                    onClick={() => setIsScrollMode(!isScrollMode)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${isScrollMode ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'}`}
+                                >
+                                    <List className="w-4 h-4" />
+                                    {isScrollMode ? 'Exit Scroll Mode' : 'Continuous Scroll'}
+                                </button>
+                            </div>
+                            <div className="flex-1 w-full flex flex-col items-center pb-8 gap-4">
+                                <Document
+                                    file={pdfFile}
+                                    onLoadSuccess={onDocumentLoadSuccess}
+                                    onLoadError={onDocumentLoadError}
+                                    loading={<Loader fullScreen={false} className="py-20" />}
+                                    error={
+                                        <div className="flex flex-col items-center gap-4 py-20 text-center px-6">
+                                            <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-2">
+                                                <X className="w-8 h-8" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-bold">Failed to load PDF</h3>
+                                                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                                                    We couldn't retrieve the AI-generated document.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => window.location.reload()}
+                                                className="btn-primary"
+                                            >
+                                                Try Refreshing
+                                            </button>
+                                        </div>
+                                    }
+                                >
+                                    {isScrollMode ? (
+                                        Array.from(new Array(numPages), (el, index) => (
+                                            <Page
+                                                key={`page_${index + 1}`}
+                                                pageNumber={index + 1}
+                                                scale={scale}
+                                                className="shadow-xl mb-4"
+                                                renderTextLayer={true}
+                                                renderAnnotationLayer={true}
+                                            />
+                                        ))
+                                    ) : (
+                                        <Page
+                                            pageNumber={pageNumber}
+                                            scale={scale}
+                                            className="shadow-xl"
+                                            renderTextLayer={true}
+                                            renderAnnotationLayer={true}
+                                        />
+                                    )}
+                                </Document>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // Fallback for non-PDF web content (processing or failed)
+                // Fallback for non-PDF web content (processing or failed)
+                const screenshotUrl = content.file?.thumbnail?.url || content.extractedData?.metadata?.thumbnail_url;
+
+                return (
+                    <div className="flex flex-col items-center bg-gray-100 dark:bg-gray-900 overflow-auto p-4 h-full min-h-[500px] w-full custom-scrollbar" ref={viewerRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
+                        {screenshotUrl ? (
+                            <div className="relative w-full max-w-4xl mx-auto shadow-2xl rounded-xl overflow-hidden bg-white dark:bg-black group">
+                                <img
+                                    src={screenshotUrl}
+                                    alt="Website Screenshot"
+                                    className="w-full h-auto object-contain select-none pointer-events-none"
+                                />
+
+                                {isSelectionMode && (
+                                    <div className="absolute inset-0 z-40 bg-black/10 cursor-crosshair">
+                                        <div className="absolute top-4 left-4 bg-primary text-white px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg animate-bounce">
+                                            Selection Mode Active
+                                        </div>
+                                    </div>
+                                )}
+
+                                {selectionBox && (
+                                    <div
+                                        className="absolute border-2 border-primary bg-primary/10 z-50 shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]"
+                                        style={{
+                                            left: selectionBox.x,
+                                            top: selectionBox.y,
+                                            width: selectionBox.width,
+                                            height: selectionBox.height
+                                        }}
+                                    >
+                                        <div className="absolute -top-3 -left-3 w-6 h-6 bg-primary rounded-full flex items-center justify-center text-white scale-75">
+                                            <Pencil className="w-3 h-3" />
+                                        </div>
+                                        <div className="absolute top-0 right-0 w-4 h-4 bg-primary cursor-se-resize" />
+                                    </div>
+                                )}
+
+                                {/* Status Overlay for Web processing */}
+                                {(content.processingStatus === 'processing' || content.processingStatus === 'pending') && (
+                                    <div className="absolute bottom-6 left-6 right-6 bg-background/90 backdrop-blur-md p-6 rounded-2xl shadow-2xl border border-primary/20 flex flex-col items-center text-center z-[60]">
+                                        <Loader fullScreen={false} className="mb-4 scale-75" />
+                                        <h3 className="text-xl font-black mb-1">AI Simplification in Progress</h3>
+                                        <p className="text-sm text-muted-foreground mb-4">
+                                            We're currently distilling this website into a student-friendly summary and PDF.
+                                        </p>
+                                        <div className="w-full max-w-xs bg-secondary rounded-full h-1.5 mb-2 overflow-hidden">
+                                            <motion.div
+                                                className="bg-primary h-full rounded-full"
+                                                initial={{ width: "10%" }}
+                                                animate={{ width: `${content.processingProgress || 20}%` }}
+                                            />
+                                        </div>
+                                        <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em]">
+                                            Step: {content.processingProgress < 40 ? 'Researching' : content.processingProgress < 70 ? 'Simplifying' : 'Generating Files'}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center p-12 text-center h-full flex-1">
+                                {content.processingStatus === 'processing' || content.processingStatus === 'pending' ? (
+                                    <div className="max-w-md w-full">
+                                        <Loader fullScreen={false} className="mb-6" />
+                                        <h3 className="text-2xl font-bold mb-2">AI is Simplifying...</h3>
+                                        <p className="text-muted-foreground mb-8">
+                                            Hang tight! We're scraping the website and using AI to create a student-friendly summary for you.
+                                        </p>
+                                        <div className="w-full bg-secondary rounded-full h-2 mb-2">
+                                            <div
+                                                className="bg-primary h-2 rounded-full transition-all duration-500"
+                                                style={{ width: `${content.processingProgress || 10}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                ) : content.processingStatus === 'failed' ? (
+                                    <div className="max-w-md">
+                                        <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-6">
+                                            <X className="w-10 h-10 text-red-500" />
+                                        </div>
+                                        <h3 className="text-2xl font-bold mb-2">Simplification Failed</h3>
+                                        <p className="text-muted-foreground mb-8">
+                                            We couldn't automatically simplify this page. You can still visit the original website below.
+                                        </p>
+                                        <a
+                                            href={content.file.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="btn-primary flex items-center justify-center gap-2"
+                                        >
+                                            <ExternalLink className="w-4 h-4" />
+                                            Visit Original Website
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <div className="max-w-md">
+                                        <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                                            <Globe className="w-10 h-10 text-primary" />
+                                        </div>
+                                        <h3 className="text-2xl font-bold mb-2">Web Resource</h3>
+                                        <p className="text-muted-foreground mb-8">
+                                            This is an external web resource. The AI simplification is not available as a PDF for this link.
+                                        </p>
+                                        <a
+                                            href={content.file.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="btn-primary flex items-center justify-center gap-2"
+                                        >
+                                            <ExternalLink className="w-4 h-4" />
+                                            Open Website
+                                        </a>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                );
             default:
                 return (
                     <div className="flex flex-col items-center justify-center p-12 text-center h-full">
@@ -394,6 +609,43 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                         >
                             <Pencil className={`w-5 h-5 ${isSelectionMode ? 'animate-pulse' : ''}`} />
                         </button>
+                        {content.type === 'web' && content.extractedData?.metadata?.url && (
+                            <a
+                                href={content.extractedData.metadata.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg text-xs font-bold flex items-center gap-2 transition-all mr-2"
+                            >
+                                <ExternalLink className="w-4 h-4" />
+                                Original Website
+                            </a>
+                        )}
+                        {content.type === 'web' && (
+                            <div className="flex items-center gap-2">
+                                {content.file.format === 'pdf' && (
+                                    <a
+                                        href={content.file.url}
+                                        download={`${content.title}_Summary.pdf`}
+                                        className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                                        title="Download the AI-Simplified PDF Summary"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        PDF Summary
+                                    </a>
+                                )}
+                                {content.extractedData?.metadata?.docxUrl && (
+                                    <a
+                                        href={content.extractedData.metadata.docxUrl}
+                                        download={`${content.title}_Summary.docx`}
+                                        className="px-3 py-1.5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                                        title="Download the Word Summary"
+                                    >
+                                        <FileText className="w-4 h-4" />
+                                        Word Doc
+                                    </a>
+                                )}
+                            </div>
+                        )}
                         <div className="w-px h-6 bg-border mx-2" />
                         <button
                             onClick={toggleFullScreen}
@@ -402,7 +654,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                         >
                             {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
                         </button>
-                        {content.file?.format !== 'youtube' && (
+                        {content.file?.format !== 'youtube' && content.type !== 'web' && (
                             <a
                                 href={content.file?.url}
                                 download
