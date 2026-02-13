@@ -13,6 +13,7 @@ import apiClient from '../../api/axios.config';
 import ContentViewer from '../../components/faculty/ContentViewer';
 import ExtractedInfoModal from '../../components/faculty/ExtractedInfoModal';
 import Loader from '../../components/Loader';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function CourseResources() {
     const { courseId } = useParams();
@@ -37,7 +38,9 @@ export default function CourseResources() {
         try {
             const response = await apiClient.get(`/courses/${courseId}`);
             setCourse(response.data.data.course);
-            setContents(response.data.data.course.contentIds || []);
+            // Filter out any null/undefined items (orphaned references)
+            const validContents = (response.data.data.course.contentIds || []).filter(item => item !== null && typeof item === 'object' && item._id);
+            setContents(validContents);
         } catch (error) {
             console.error('Fetch course resources error:', error);
             setError(true);
@@ -116,6 +119,7 @@ export default function CourseResources() {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        <ThemeToggle />
                         <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-secondary/50 rounded-xl text-sm font-medium hover:bg-secondary transition-colors">
                             <Star className="w-4 h-4 text-yellow-500" />
                             Rate Course

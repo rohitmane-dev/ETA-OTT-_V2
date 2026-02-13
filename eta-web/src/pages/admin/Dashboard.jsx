@@ -1,4 +1,5 @@
 import { useAuth } from '../../contexts/AuthContext';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function AdminDashboard() {
     const { user, logout } = useAuth();
@@ -8,9 +9,12 @@ export default function AdminDashboard() {
             <nav className="bg-card border-b px-6 py-4">
                 <div className="container mx-auto flex justify-between items-center">
                     <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-                    <button onClick={logout} className="btn-ghost">
-                        Logout
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <ThemeToggle />
+                        <button onClick={logout} className="btn-ghost">
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </nav>
 

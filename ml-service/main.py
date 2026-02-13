@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from extractors.pdf_extractor import extract_pdf
 from extractors.video_extractor import extract_video
 from extractors.youtube_extractor import extract_youtube
+from extractors.web_extractor import extract_web_content
 
 load_dotenv()
 
@@ -42,6 +43,9 @@ async def extract_data(request: ExtractionRequest):
                 return {"success": True, "message": "YouTube extraction successful", "data": result}
             else:
                 return {"success": False, "message": result.get("error", "YouTube extraction failed"), "data": None}
+        elif request.content_type == 'web':
+            result = await extract_web_content(request.file_url)
+            return {"success": True, "message": "Web content extraction successful", "data": result}
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported content type: {request.content_type}")
             

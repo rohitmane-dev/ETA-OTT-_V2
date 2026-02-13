@@ -6,6 +6,9 @@ import { requireFaculty } from '../middleware/role.middleware.js';
 import { uploadWithThumbnail, validateFileSize, getContentType } from '../services/upload.service.js';
 import Content from '../models/Content.model.js';
 import Course from '../models/Course.model.js';
+import Doubt from '../models/Doubt.model.js';
+import Branch from '../models/Branch.model.js';
+import { deleteFromCloudinary } from '../config/cloudinary.config.js';
 import { extractPDFData, generateSummary } from '../services/extraction/pdf.extractor.js';
 import { extractVideoMetadata, formatDuration, getQualityLabel } from '../services/extraction/video.extractor.js';
 import { extractCodeData } from '../services/extraction/code.extractor.js';
@@ -148,7 +151,7 @@ router.post('/', authenticate, attachUser, requireFaculty, uploadWithThumbnail, 
         }
 
         // Start background processing (don't wait for it)
-        processContent(content._id, contentType, req.file.path).catch(err => {
+        processContent(content._id, contentType, file.path).catch(err => {
             console.error('Content processing error:', err);
         });
 
@@ -255,6 +258,94 @@ router.post('/youtube', authenticate, attachUser, requireFaculty, async (req, re
     }
 });
 
+// Add Web Link Content
+router.post('/web', authenticate, attachUser, requireFaculty, async (req, res) => {
+    try {
+        const { courseId, title, url, description, difficulty, category, tags } = req.body;
+
+        if (!url) {
+            return res.status(400).json({ success: false, message: 'URL is required' });
+        }
+
+        // Basic URL validation
+        const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
+        if (!urlRegex.test(url)) {
+            return res.status(400).json({ success: false, message: 'Invalid URL' });
+        }
+
+        // Verify course exists
+        const course = await Course.findById(courseId);
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        if (!course.facultyIds.includes(req.dbUser._id)) {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+
+        // Create content record
+        const content = await Content.create({
+            courseId,
+            branchIds: course.branchIds,
+            institutionId: course.institutionId,
+            title: title || 'Web Resource',
+            description,
+            type: 'web',
+            file: {
+                url: url,
+                format: 'web',
+                size: 0
+            },
+            metadata: {
+                difficulty: difficulty || 'intermediate',
+                category: category || 'Reference Material',
+                tags: tags ? (Array.isArray(tags) ? tags : JSON.parse(tags)) : []
+            },
+            uploadedBy: req.dbUser._id,
+            processingStatus: 'pending',
+            isPublished: true,
+            publishedAt: new Date()
+        });
+
+        // Link content to course
+        await Course.findByIdAndUpdate(courseId, {
+            $push: { contentIds: content._id },
+            $inc: { 'stats.totalContent': 1 }
+        });
+
+        // Notify students via WebSocket
+        try {
+            emitToCourse(courseId, 'content:uploaded', {
+                contentId: content._id,
+                title: content.title,
+                type: 'web',
+                courseId: courseId,
+                timestamp: new Date()
+            });
+        } catch (wsError) {
+            console.error('WebSocket notification error:', wsError);
+        }
+
+        // Start background processing via ML service
+        processContent(content._id, 'web', url).catch(err => {
+            console.error('Web processing error:', err);
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Web resource added. Scraping and simplifying content in background...',
+            data: { content }
+        });
+    } catch (error) {
+        console.error('Add web resource error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to add web resource',
+            error: error.message
+        });
+    }
+});
+
 // Background processing function
 async function processContent(contentId, contentType, fileUrl) {
     try {
@@ -276,7 +367,7 @@ async function processContent(contentId, contentType, fileUrl) {
         // 2. Extract data based on content type
         try {
             console.log(`🔍 [${contentId}] Extracting ${contentType} data via ML service...`);
-            if (contentType === 'pdf' || contentType === 'video' || contentType === 'youtube') {
+            if (contentType === 'pdf' || contentType === 'video' || contentType === 'youtube' || contentType === 'web') {
                 const mlData = await extractWithML(fileUrl, contentId, contentType);
 
                 if (contentType === 'pdf') {
@@ -309,6 +400,42 @@ async function processContent(contentId, contentType, fileUrl) {
                             publicId: mlData.metadata.thumbnail_public_id || ''
                         };
                     } else if (mlData.thumbnail_url) {
+                        content.file.thumbnail = {
+                            url: mlData.thumbnail_url,
+                            publicId: mlData.thumbnail_public_id || ''
+                        };
+                    }
+                } else if (contentType === 'web') {
+                    extractedData = {
+                        text: mlData.text,
+                        raw_text: mlData.raw_text,
+                        summary: mlData.summary,
+                        topics: mlData.topics || [],
+                        keywords: mlData.keywords || [],
+                        metadata: {
+                            ...mlData.metadata,
+                            title: mlData.title,
+                            url: mlData.url
+                        }
+                    };
+
+                    // Update content with title from web page if user didn't provide one
+                    if (mlData.title) {
+                        content.title = mlData.title;
+                    }
+
+                    if (mlData.pdf_url) {
+                        content.file.url = mlData.pdf_url;
+                        content.file.publicId = mlData.pdf_public_id || '';
+                        content.file.format = 'pdf';
+                    }
+
+                    if (mlData.docx_url) {
+                        extractedData.metadata.docxUrl = mlData.docx_url;
+                        extractedData.metadata.docxPublicId = mlData.docx_public_id || '';
+                    }
+
+                    if (mlData.thumbnail_url) {
                         content.file.thumbnail = {
                             url: mlData.thumbnail_url,
                             publicId: mlData.thumbnail_public_id || ''
@@ -532,24 +659,80 @@ router.delete('/:id', authenticate, attachUser, requireFaculty, async (req, res)
             });
         }
 
-        // Verify authorization
-        if (content.uploadedBy.toString() !== req.dbUser._id.toString()) {
+        // Verify authorization (Either uploader or faculty of the course)
+        const targetCourse = await Course.findById(content.courseId);
+        const isUploader = content.uploadedBy.toString() === req.dbUser._id.toString();
+        const isCourseFaculty = targetCourse && targetCourse.facultyIds.map(id => id.toString()).includes(req.dbUser._id.toString());
+
+        if (!isUploader && !isCourseFaculty) {
             return res.status(403).json({
                 success: false,
                 message: 'You are not authorized to delete this content'
             });
         }
 
-        // Delete from Neo4j
-        await deleteContentNode(content._id);
+        // Delete files from Cloudinary
+        if (content.file && content.file.publicId) {
+            await deleteFromCloudinary(content.file.publicId).catch(err => {
+                console.error('Cloudinary file delete error:', err);
+            });
+        }
 
-        // Soft delete
-        content.isActive = false;
-        await content.save();
+        // Delete thumbnail from Cloudinary
+        if (content.file && content.file.thumbnail && content.file.thumbnail.publicId) {
+            await deleteFromCloudinary(content.file.thumbnail.publicId).catch(err => {
+                console.error('Cloudinary thumbnail delete error:', err);
+            });
+        }
+
+        // Delete Word document from Cloudinary if it exists (for web content)
+        if (content.extractedData?.metadata?.docxPublicId) {
+            await deleteFromCloudinary(content.extractedData.metadata.docxPublicId).catch(err => {
+                console.error('Cloudinary docx delete error:', err);
+            });
+        }
+
+        // Delete from Neo4j
+        await deleteContentNode(content._id).catch(err => {
+            console.error('Neo4j delete error:', err);
+        });
+
+        // Remove reference from Course and update stats
+        const course = await Course.findByIdAndUpdate(content.courseId, {
+            $pull: { contentIds: content._id },
+            $inc: { 'stats.totalContent': -1 }
+        });
+
+        // Update branch stats
+        if (course && course.branchIds && course.branchIds.length > 0) {
+            await Branch.updateMany(
+                { _id: { $in: course.branchIds } },
+                { $inc: { 'stats.totalContent': -1 } }
+            );
+        }
+
+        // Delete associated Doubts
+        await Doubt.deleteMany({ contentId: content._id });
+
+        // 5. Hard delete content from MongoDB
+        console.log(`🗑️ Hard deleting content from MongoDB: ${content._id}`);
+        const deletedContent = await Content.findByIdAndDelete(content._id);
+
+        if (!deletedContent) {
+            console.warn(`⚠️ Content ${content._id} was already deleted or not found during final step`);
+        } else {
+            console.log(`✅ Successfully deleted content: ${content.title}`);
+        }
+
+        // 6. Ensure ID is removed from course contentIds (even if pull failed before)
+        await Course.updateOne(
+            { _id: content.courseId },
+            { $pull: { contentIds: content._id } }
+        );
 
         res.json({
             success: true,
-            message: 'Content deleted successfully'
+            message: 'Content and all related resources deleted successfully'
         });
     } catch (error) {
         console.error('Delete content error:', error);

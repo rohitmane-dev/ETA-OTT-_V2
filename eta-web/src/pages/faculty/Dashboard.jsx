@@ -20,7 +20,8 @@ import {
     Search,
     Plus,
     Key,
-    Video
+    Video,
+    Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import apiClient from '../../api/axios.config';
@@ -29,6 +30,7 @@ import JoinInstitutionModal from '../../components/faculty/JoinInstitutionModal'
 import InstitutionCard from '../../components/faculty/InstitutionCard';
 import FacultyDoubtManager from '../../components/faculty/FacultyDoubtManager';
 import Loader from '../../components/Loader';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export default function FacultyDashboard() {
     const { user, logout } = useAuth();
@@ -136,6 +138,19 @@ export default function FacultyDashboard() {
         setSelectedInstitution(null);
     };
 
+    const handleDeleteContent = async (itemId) => {
+        if (!confirm('Are you sure you want to delete this resource? This will remove it from everywhere.')) return;
+
+        try {
+            await apiClient.delete(`/content/${itemId}`);
+            setRecentContent(recentContent.filter(item => item._id !== itemId));
+            toast.success('Resource deleted successfully');
+        } catch (error) {
+            console.error('Delete content error:', error);
+            toast.error('Failed to delete resource');
+        }
+    };
+
     return (
         <div className="min-h-screen bg-background flex">
             {/* Sidebar */}
@@ -231,6 +246,7 @@ export default function FacultyDashboard() {
                         </div>
 
                         <div className="flex items-center gap-4">
+                            <ThemeToggle />
                             {/* Search */}
                             <div className="hidden md:flex items-center gap-2 bg-secondary px-4 py-2 rounded-lg">
                                 <Search className="w-5 h-5 text-muted-foreground" />
@@ -509,12 +525,21 @@ export default function FacultyDashboard() {
                                                 <span className="text-[10px] text-muted-foreground italic">
                                                     {new Date(item.createdAt).toLocaleDateString()}
                                                 </span>
-                                                <button
-                                                    onClick={() => navigate(`/faculty/courses/${item.courseId?._id}/content`)}
-                                                    className="text-xs text-primary font-bold hover:underline"
-                                                >
-                                                    View in Course
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => handleDeleteContent(item._id)}
+                                                        className="p-1.5 text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                                                        title="Delete Resource"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => navigate(`/faculty/courses/${item.courseId?._id}/content`)}
+                                                        className="text-xs text-primary font-bold hover:underline"
+                                                    >
+                                                        View in Course
+                                                    </button>
+                                                </div>
                                             </div>
                                         </motion.div>
                                     ))}

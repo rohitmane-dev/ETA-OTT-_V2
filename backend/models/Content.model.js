@@ -31,7 +31,7 @@ const contentSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['pdf', 'video', 'presentation', 'code', 'document', 'image', 'audio', 'other'],
+        enum: ['pdf', 'video', 'presentation', 'code', 'document', 'image', 'audio', 'web', 'other'],
         required: true,
         index: true
     },

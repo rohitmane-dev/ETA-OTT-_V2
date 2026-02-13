@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { GraduationCap, Brain, Users, Sparkles } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function LandingPage() {
     const { theme, toggleTheme } = useTheme();
@@ -19,12 +20,7 @@ export default function LandingPage() {
                     </div>
 
                     <div className="flex items-center space-x-4">
-                        <button
-                            onClick={toggleTheme}
-                            className="p-2 rounded-lg hover:bg-secondary transition-colors"
-                        >
-                            {theme === 'light' ? '🌙' : '☀️'}
-                        </button>
+                        <ThemeToggle />
                         <Link to="/login" className="btn-ghost">
                             Login
                         </Link>
