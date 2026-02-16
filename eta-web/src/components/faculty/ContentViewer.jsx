@@ -227,7 +227,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
         return content.file.url;
     }, [content?.file?.url, content?.type, content?.file?.format]);
 
-    if (!isOpen || !content) return null;
+    if (!isOpen || !content || !localContent) return null;
 
     function onDocumentLoadSuccess({ numPages }) {
         setNumPages(numPages);
@@ -765,10 +765,10 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                             {content.type === 'video' ? <Video className="w-5 h-5 text-primary" /> : <FileText className="w-5 h-5 text-primary" />}
                         </div>
                         <div className="min-w-0">
-                            <h2 className="text-lg font-bold truncate">{localContent.title}</h2>
+                            <h2 className="text-lg font-bold truncate">{localContent?.title || 'Loading Content...'}</h2>
                             <div className="flex items-center gap-2 mt-0.5">
                                 <p className="text-xs text-muted-foreground capitalize">
-                                    {localContent.metadata?.category || localContent.type} • {localContent.metadata?.difficulty}
+                                    {localContent?.metadata?.category || localContent?.type || 'General'} • {localContent?.metadata?.difficulty || 'Standard'}
                                 </p>
                                 {localContent.processingStatus && (
                                     <>

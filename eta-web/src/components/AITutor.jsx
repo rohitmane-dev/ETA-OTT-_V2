@@ -7,16 +7,75 @@ import apiClient from '../api/axios.config';
 import toast from 'react-hot-toast';
 import GroqKeyModal from './GroqKeyModal';
 
+const highlightCode = (code, lang) => {
+    if (!code) return code;
+
+    // Premium JetBrains/VSCode inspired color palette
+    const colors = {
+        keyword: 'text-[#ff7b72] font-semibold', // Salmon red
+        function: 'text-[#d2a8ff]',           // Lavender purple
+        string: 'text-[#a5d6ff]',             // Sky blue
+        comment: 'text-[#8b949e] italic',     // Muted gray
+        number: 'text-[#6e7681]',             // Slate gray
+        builtin: 'text-[#ffa657]',            // Orange
+        operator: 'text-[#ff7b72]',           // Same as keyword
+        bracket: 'text-[#f0f6fc]',            // Bright white
+        variable: 'text-[#c9d1d9]'            // Default text
+    };
+
+    // Simple but effective regex tokenizer
+    const tokens = [
+        { type: 'comment', regex: /(\/\/.*|#.*|\/\*[\s\S]*?\*\/)/g },
+        { type: 'string', regex: /(".*?"|'.*?'|`[\s\S]*?`)/g },
+        { type: 'number', regex: /(\b\d+(\.\d+)?\b)/g },
+        { type: 'keyword', regex: /\b(const|let|var|function|return|if|else|for|while|import|export|class|extends|async|await|try|catch|finally|from|new|this|super|def|elif|lambda|in|is|not|and|or|case|switch|break|continue|default|type|interface|enum|public|private|protected|static|readonly|void|bool|string|number)\b/g },
+        { type: 'function', regex: /\b([a-zA-Z_]\w*)(?=\s*\()/g },
+        { type: 'builtin', regex: /\b(console|window|document|Math|JSON|Object|Array|Promise|print|len|range|enumerate|map|filter|zip)\b/g },
+        { type: 'operator', regex: /(=>|===|==|=|\+|\-|\*|\/|%|<|>|&|\||!|\?)/g },
+        { type: 'bracket', regex: /([\(\)\{\}\[\]])/g }
+    ];
+
+    // Split text into parts and highlight
+    const parts = [{ text: code, type: 'variable' }];
+
+    tokens.forEach(token => {
+        for (let i = 0; i < parts.length; i++) {
+            if (parts[i].type !== 'variable') continue;
+
+            const matches = parts[i].text.split(token.regex);
+            if (matches.length <= 1) continue;
+
+            const newParts = [];
+            matches.forEach((content, index) => {
+                if (index % 2 === 1) {
+                    newParts.push({ text: content, type: token.type });
+                } else if (content) {
+                    newParts.push({ text: content, type: 'variable' });
+                }
+            });
+
+            parts.splice(i, 1, ...newParts);
+            i += newParts.length - 1;
+        }
+    });
+
+    return parts.map((p, i) => (
+        <span key={i} className={colors[p.type] || colors.variable}>
+            {p.text}
+        </span>
+    ));
+};
+
 const formatMessage = (content) => {
     if (!content) return null;
 
-    // Clean up markers and video links so they don't show as raw text
+    // Clean up markers and video links
     const cleanContent = content
         .replace(/\[\[(INTRO|CONCEPT|CODE|SUMMARY)\]\]/g, '')
-        .replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '') // Strips [[VIDEO: URL]]
-        .replace(/(Video|Relevant video|Suggested video):\s*https?:\/\/[^\s]+/gi, '') // Strips prefixed URLs
-        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s\[\]"'>]+/g, '') // Robust YouTube stripping
-        .replace(/https?:\/\/[^\s\[\]"'>]+/g, '') // General URL stripping to be safe
+        .replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '')
+        .replace(/(Video|Relevant video|Suggested video):\s*https?:\/\/[^\s]+/gi, '')
+        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s\[\]"'>]+/g, '')
+        .replace(/https?:\/\/[^\s\[\]"'>]+/g, '')
         .trim();
 
     if (!cleanContent) return null;
@@ -40,35 +99,37 @@ const formatMessage = (content) => {
                 inCodeBlock = false;
                 const codeString = codeLines.join('\n');
                 elements.push(
-                    <div key={`code-${lineIndex}`} className="my-6 rounded-2xl overflow-hidden border border-border shadow-2xl bg-[#0d1117] w-full">
-                        <div className="bg-[#161b22] px-4 py-2 border-b border-white/10 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <div className="flex gap-1 shrink-0">
-                                    <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />
-                                    <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
-                                    <div className="w-2.5 h-2.5 rounded-full bg-green-500/50" />
+                    <div key={`code-${lineIndex}`} className="my-6 rounded-2xl overflow-hidden border border-white/5 shadow-2xl bg-[#0d1117] w-full group">
+                        <div className="bg-[#161b22] px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="flex gap-1.5 shrink-0">
+                                    <div className="w-3 h-3 rounded-full bg-[#ff5f56]" />
+                                    <div className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
+                                    <div className="w-3 h-3 rounded-full bg-[#27c93f]" />
                                 </div>
-                                <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest ml-2 truncate">
+                                <div className="h-4 w-px bg-white/10 mx-1" />
+                                <span className="text-[10px] font-mono font-black text-white/40 uppercase tracking-[0.2em]">
                                     {codeLanguage}
                                 </span>
                             </div>
                             <button
                                 onClick={() => {
                                     navigator.clipboard.writeText(codeString);
-                                    toast.success('Code copied!');
+                                    toast.success('Snippet copied to clipboard!');
                                 }}
-                                className="text-[10px] text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded shrink-0"
+                                className="text-[10px] font-bold text-white/40 hover:text-white transition-all flex items-center gap-2 bg-white/5 hover:bg-white/10 px-3 py-1 rounded-lg border border-white/5 hover:border-white/10"
                             >
-                                Copy
+                                <Maximize2 className="w-3 h-3" />
+                                COPY
                             </button>
                         </div>
-                        <div className="p-0 overflow-x-auto custom-scrollbar scrollbar-none sm:scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                            <pre className="p-5 min-w-full w-fit">
-                                <code className="text-[13px] font-mono leading-relaxed text-[#c9d1d9] block whitespace-pre">
+                        <div className="p-0 overflow-x-auto custom-scrollbar bg-slate-950/20">
+                            <pre className="p-6 min-w-full w-fit">
+                                <code className="text-[13px] font-mono leading-relaxed block whitespace-pre">
                                     {codeLines.map((l, i) => (
-                                        <div key={i} className="flex gap-4 min-w-fit">
-                                            <span className="text-gray-600 select-none text-right min-w-[20px]">{i + 1}</span>
-                                            <span className="flex-1 whitespace-pre">{l}</span>
+                                        <div key={i} className="flex gap-6 min-w-fit hover:bg-white/[0.02] -mx-6 px-6 transition-colors group/line">
+                                            <span className="text-white/10 select-none text-right min-w-[24px] font-bold group-hover/line:text-white/30 transition-colors">{i + 1}</span>
+                                            <span className="flex-1 whitespace-pre">{highlightCode(l, codeLanguage)}</span>
                                         </div>
                                     ))}
                                 </code>
@@ -565,7 +626,7 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                 language: targetLanguage
             });
 
-            const { doubt, source } = response.data.data;
+            const { doubt, source, isSaved } = response.data.data;
 
             const aiMsgId = (Date.now() + 1).toString();
             setMessages(prev => [...prev, {
@@ -576,6 +637,7 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                 isTyping: true,
                 confidence: doubt.confidence || 95,
                 source: source,
+                isSaved: isSaved,
                 pendingVideo: doubt.suggestedVideo
             }]);
 
@@ -830,13 +892,19 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                                                             <div className="flex flex-col">
                                                                 <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 truncate">Recommended Tutorial</span>
                                                                 {msg.suggestedVideo.searchQuery && (
-                                                                    <span className="text-[8px] text-muted-foreground italic">Search: "{msg.suggestedVideo.searchQuery}"</span>
-                                                                )}
-                                                                {msg.suggestedVideo.views && (
-                                                                    <span className="text-[8px] text-muted-foreground">{msg.suggestedVideo.views.toLocaleString()} views</span>
+                                                                    <span className="text-[8px] text-muted-foreground italic truncate max-w-[150px]">Topic: {msg.suggestedVideo.searchQuery.split(' ')[0]}...</span>
                                                                 )}
                                                             </div>
                                                         </div>
+                                                        <a
+                                                            href={msg.suggestedVideo.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 rounded-md text-[9px] font-bold text-blue-600 transition-colors"
+                                                        >
+                                                            <ArrowUpRight className="w-3 h-3" />
+                                                            YOUTUBE
+                                                        </a>
                                                     </div>
                                                     <div className="w-full relative bg-black aspect-video">
                                                         <ReactPlayer
@@ -849,119 +917,98 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                                                     </div>
                                                 </div>
                                             )}
-                                            {!msg.isVideoMessage && formatMessage(msg.content)}
-                                            {/* Show video for completed messages - Robust extraction */}
-                                            {!msg.isVideoMessage && (() => {
-                                                const videoMatchInside = msg.content?.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
-                                                const videoMatchRaw = msg.content?.match(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/);
-                                                const videoUrl = videoMatchInside ? videoMatchInside[1] : (videoMatchRaw ? videoMatchRaw[0] : null);
+                                            {!msg.isVideoMessage && (
+                                                <div className="space-y-4">
+                                                    <div>{formatMessage(msg.content)}</div>
 
-                                                if (videoUrl) {
-                                                    return (
-                                                        <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full">
-                                                            <div className="p-3 bg-blue-500/5 border-b flex items-center justify-between">
+                                                    {!msg.isTyping && msg.role === 'assistant' && (
+                                                        <motion.div
+                                                            initial={{ opacity: 0, y: 5 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                            className={`p-4 rounded-2xl transition-all border ${msg.source === 'KNOWLEDGE_GRAPH'
+                                                                ? 'bg-emerald-500/5 dark:bg-emerald-500/5 border-emerald-500/30'
+                                                                : msg.isSaved
+                                                                    ? 'bg-amber-500/5 border-amber-500/30'
+                                                                    : 'bg-white/5 dark:bg-black/20 dark:border-white/5 border-white/10'
+                                                                } backdrop-blur-md shadow-inner`}
+                                                        >
+                                                            <div className="flex items-center justify-between flex-wrap gap-4">
+                                                                <div className="flex items-center gap-3 flex-wrap">
+                                                                    {msg.source === 'KNOWLEDGE_GRAPH' ? (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full group cursor-help" title="Verified answer from the institutional knowledge base">
+                                                                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
+                                                                            <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-tight flex items-center gap-2">
+                                                                                🟢 <span className="mt-0.5">Knowledge Graph Hit</span>
+                                                                            </span>
+                                                                        </div>
+                                                                    ) : msg.isSaved ? (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full group cursor-help" title="High confidence AI response saved for future learning">
+                                                                            <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.8)]" />
+                                                                            <span className="text-[11px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-tight flex items-center gap-2">
+                                                                                🟡 <span className="mt-0.5">Learned Resolution</span>
+                                                                            </span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-rose-500/10 border border-rose-500/20 rounded-full group cursor-help" title="Real-time AI response (not yet in database)">
+                                                                            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
+                                                                            <span className="text-[11px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-tight flex items-center gap-2">
+                                                                                🔴 <span className="mt-0.5">AI API Response</span>
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {msg.confidence && (
+                                                                        <div className={`px-2 py-1 rounded-lg text-[11px] font-bold ${msg.confidence >= 85 ? 'text-emerald-500' :
+                                                                            msg.confidence >= 70 ? 'text-amber-500' :
+                                                                                'text-rose-500'
+                                                                            }`}>
+                                                                            {Math.round(msg.confidence)}% Reliability
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className="p-1 bg-blue-500 rounded-lg shrink-0">
-                                                                        <Youtube className="w-4 h-4 text-white" />
-                                                                    </div>
-                                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 truncate">Related Content</span>
+                                                                    {!msg.escalated ? (
+                                                                        <button
+                                                                            onClick={() => handleEscalate(msg.doubtId, msg.id)}
+                                                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all text-[11px] font-bold border ${msg.confidence >= 85 ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500 hover:text-white' :
+                                                                                msg.confidence >= 70 ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500 hover:text-white' :
+                                                                                    'bg-rose-500/10 text-rose-600 border-rose-500/20 hover:bg-rose-500 hover:text-white font-black animate-pulse'
+                                                                                }`}
+                                                                            title={msg.confidence < 70 ? "Low reliability - Highly recommended to escalate" : "Need more help? Escalate to your mentor"}
+                                                                        >
+                                                                            <ArrowUpRight className="w-3.5 h-3.5" />
+                                                                            <span>{msg.confidence < 70 ? "Escalate to Mentor" : "Escalate"}</span>
+                                                                        </button>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 rounded-full text-[11px] font-bold border border-emerald-500/20">
+                                                                            <CheckCircle2 className="w-3.5 h-3.5" />
+                                                                            <span>Escalated</span>
+                                                                        </div>
+                                                                    )}
+
+                                                                    <button
+                                                                        onClick={() => speak(msg.content, msg.id)}
+                                                                        className={`p-2 rounded-xl transition-all ${speaking === msg.id ? 'bg-primary text-white shadow-lg' : 'hover:bg-primary/10 text-primary'}`}
+                                                                        title="Listen again"
+                                                                    >
+                                                                        <Volume2 className={`w-4 h-4 ${speaking === msg.id ? 'animate-pulse' : ''}`} />
+                                                                    </button>
                                                                 </div>
                                                             </div>
-                                                            <div className="w-full relative bg-black aspect-video">
-                                                                <ReactPlayer
-                                                                    url={videoUrl}
-                                                                    width="100%"
-                                                                    height="100%"
-                                                                    style={{ position: 'absolute', top: 0, left: 0 }}
-                                                                    controls={true}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                }
-                                                return null;
-                                            })()}
-                                        </>
-                                    )}
 
-                                    {msg.role === 'assistant' && !msg.isTyping && !msg.isVideoMessage && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: 5 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            className={`mt-4 p-4 rounded-2xl transition-all border ${msg.source === 'KNOWLEDGE_GRAPH'
-                                                ? 'bg-emerald-500/5 dark:bg-emerald-500/5 border-emerald-500/30'
-                                                : 'bg-white/5 dark:bg-black/20 dark:border-white/5 border-white/10'
-                                                } backdrop-blur-md shadow-inner`}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    {msg.source === 'KNOWLEDGE_GRAPH' ? (
-                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
-                                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-tight">
-                                                                Retrieved from Knowledge Graph
-                                                            </span>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
-                                                            <Bot className="w-3.5 h-3.5 text-blue-500" />
-                                                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">
-                                                                AI Mentor Powered
-                                                            </span>
-                                                        </div>
+                                                            {/* Auto-suggestion for low confidence */}
+                                                            {msg.confidence < 70 && !msg.escalated && (
+                                                                <div className="mt-3 py-2 px-3 bg-rose-500/10 rounded-lg border border-rose-500/20 flex items-center gap-2">
+                                                                    <AlertCircle className="w-3 h-3 text-rose-500" />
+                                                                    <span className="text-[11px] text-rose-600 font-medium italic">Confidence is low. Escalation recommended for accuracy.</span>
+                                                                </div>
+                                                            )}
+                                                        </motion.div>
                                                     )}
-
-                                                    {msg.confidence && (
-                                                        <div className={`px-2 py-1 rounded-lg text-[10px] font-bold ${msg.confidence >= 90 ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
-                                                            msg.confidence >= 80 ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20' :
-                                                                msg.confidence >= 70 ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' :
-                                                                    'bg-rose-500/10 text-rose-600 border border-rose-500/20'
-                                                            }`}>
-                                                            Accuracy: {Math.round(msg.confidence)}%
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                {/* Action Buttons (Escalate & Voice) */}
-                                                <div className="flex items-center gap-2">
-                                                    {!msg.escalated ? (
-                                                        <button
-                                                            onClick={() => handleEscalate(msg.doubtId, msg.id)}
-                                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all text-[10px] font-bold border ${msg.confidence >= 90 ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500 hover:text-white' :
-                                                                msg.confidence >= 80 ? 'bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500 hover:text-white' :
-                                                                    msg.confidence >= 70 ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500 hover:text-white font-black' :
-                                                                        'bg-rose-500/10 text-rose-600 border-rose-500/20 hover:bg-rose-500 hover:text-white font-black animate-pulse'
-                                                                }`}
-                                                            title={msg.confidence < 80 ? "Low confidence - Highly recommended to escalate" : "Need more help? Escalate to your mentor"}
-                                                        >
-                                                            <ArrowUpRight className="w-3.5 h-3.5" />
-                                                            <span>{msg.confidence < 80 ? "Escalate to Mentor" : "Escalate"}</span>
-                                                        </button>
-                                                    ) : (
-                                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 rounded-full text-[10px] font-bold border border-emerald-500/20">
-                                                            <CheckCircle2 className="w-3.5 h-3.5" />
-                                                            <span>Escalated</span>
-                                                        </div>
-                                                    )}
-
-                                                    <button
-                                                        onClick={() => speak(msg.content, msg.id)}
-                                                        className={`p-2 rounded-xl transition-all ${speaking === msg.id ? 'bg-primary text-white shadow-lg' : 'hover:bg-primary/10 text-primary'}`}
-                                                        title="Listen again"
-                                                    >
-                                                        <Volume2 className={`w-4 h-4 ${speaking === msg.id ? 'animate-pulse' : ''}`} />
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* Low Confidence Warning (Still show as a hint if applicable) */}
-                                            {msg.confidence < 80 && !msg.escalated && (
-                                                <div className="mt-3 py-1.5 px-3 bg-amber-500/5 rounded-lg border border-amber-500/10 flex items-center gap-2">
-                                                    <AlertCircle className="w-3 h-3 text-amber-500" />
-                                                    <span className="text-[10px] text-amber-600 font-medium italic">AI is slightly uncertain about this topic. You might want to escalate.</span>
                                                 </div>
                                             )}
-                                        </motion.div>
+                                        </>
                                     )}
                                 </div>
                             </div>

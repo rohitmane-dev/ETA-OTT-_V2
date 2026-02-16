@@ -10,7 +10,7 @@ import { Server } from 'socket.io';
 // Import configurations
 import { connectMongoDB } from './config/mongo.config.js';
 import { connectRedis } from './config/redis.config.js';
-import { connectNeo4j } from './config/neo4j.config.js';
+import { connectNeo4j, initializeGraphSchema } from './config/neo4j.config.js';
 import { initQdrant } from './config/qdrant.config.js';
 
 // Import middleware
@@ -100,6 +100,7 @@ async function startServer() {
         await connectMongoDB();
         await connectRedis();
         await connectNeo4j();
+        await initializeGraphSchema();
         await initQdrant();
 
         // Initialize WebSocket

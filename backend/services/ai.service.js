@@ -141,20 +141,26 @@ const getEmbedding = async (text) => {
 /**
  * Search Knowledge Graph for semantic match (Rule 1 & 2)
  */
-export const searchKnowledgeGraph = async (query, courseId = null) => {
+export const searchKnowledgeGraph = async (query, courseId = null, context = '') => {
     try {
-        const embedding = await getEmbedding(query);
+        // Rule 1: Combine query with context for better semantic search on follow-ups
+        const searchPhrase = (query.split(' ').length < 4 && context)
+            ? `${query} (context: ${context.substring(0, 100)})`
+            : query;
+
+        const embedding = await getEmbedding(searchPhrase);
         if (!embedding) return { match: false, confidence: 0 };
 
-        // Neo4j Vector Search (Using vector index if exists, or fallback)
-        // Note: Assumes index 'doubt_vector_index' exists as per Rule 1 Architecture
+        // Neo4j Vector Search
+        // We prioritize course-specific matches but allow global matches with higher score
         const cypher = `
             CALL db.index.vector.queryNodes('doubt_vector_index', 5, $embedding)
             YIELD node, score
-            WHERE score >= 0.80
+            WHERE score >= 0.75
             MATCH (node)-[:ANSWERS]->(a:Answer)
-            RETURN node.text as question, a.text as answer, score * 100 as confidence
-            ORDER BY score DESC LIMIT 1
+            OPTIONAL MATCH (node)-[:RELATES_TO]->(c:Course {id: $courseId})
+            RETURN node.text as question, a.text as answer, score * 100 as confidence, (c IS NOT NULL) as isSameCourse
+            ORDER BY isSameCourse DESC, score DESC LIMIT 1
         `;
 
         const result = await runNeo4jQuery(cypher, { embedding, courseId });
@@ -232,7 +238,7 @@ export const saveToKnowledgeGraph = async (params) => {
     const { query, answer, confidence, courseId, contentId, context, selectedText } = params;
 
     // Confidence threshold check (Rule 3)
-    if (confidence < 85) return null;
+    if (confidence < 80) return null;
 
     try {
         const embedding = await getEmbedding(query);
@@ -302,11 +308,10 @@ export const askGroq = async (query, context = '', visualContext = null, content
         }
 
         if (visualContext) {
-            const timeContext = context.match(/\[at \d+:\d+\]/);
             spatialInfo = `\n### CRITICAL CONTEXT: REGION OF INTEREST (ROI)
-The student has MANUALLY HIGHLIGHTED a specific area on their screen ${timeContext ? `at timestamp ${timeContext[0]}` : ''}. 
-YOUR MISSION: Analyze and explain the contents of this SPECIFIC HIGHLIGHTED BOX in extreme detail. 
-If this is a video frame, explain the visual elements, diagram components, or data points being shown in that exact region. 
+The student has MANUALLY HIGHLIGHTED a specific area on their screen. 
+YOUR MISSION: Analyze and explain the contents of this SPECIFIC HIGHLIGHTED area in detail. 
+Explain visual elements, nodes, diagrams, or components shown in that exact region. 
 Act as if you are pointing your finger at that box and teaching the student about its specific contents.`;
         }
 
@@ -339,22 +344,18 @@ Act as if you are pointing your finger at that box and teaching the student abou
             let gc = { transcriptSegment: '', selectedTimestamp: '', courseContext: '', facultyResources: '' };
             try { gc = JSON.parse(rawGrounding); } catch (e) { }
 
-            systemPrompt = `You are an expert precision tutor. The student is focusing on a SPECIFIC visual region at timestamp ${gc.selectedTimestamp}.
+            systemPrompt = `You are an expert precision tutor. The student is focusing on a SPECIFIC visual region.
 
 [[CONCEPT]] 
-Start directly with "### What You Are Seeing in This Frame". 
-- Explain visual elements, nodes, or diagrams in this specific box. 
-- Ground your analysis in this transcript segment: "${gc.transcriptSegment}".
-- Add "### Explanation of Key Elements" to break down specific details.
-- Add "### How It Connects to Topic" to link this image to ${gc.courseContext}.
+Start directly with a professional explanation of what the student has selected.
+- NO MENTION of timestamps, "frame number", or "at 0:02".
+- Explain visual elements, nodes, or diagrams in this specific selection confidently. 
+- Use ONLY provided context: "${gc.transcriptSegment}".
+- Ground your analysis in ${gc.courseContext}.
+- If the selection is not clear from the data, explicitly state: "The selected region is not fully clear from extracted data. Please adjust your selection."
+- AVOID VAGUE GUESSING (no "likely", "might", "probably"). Confident extraction-based explanation only.
 
-[[SUMMARY]]
-Provide a "### Quick Clarity Summary".
-
-[[VIDEO: URL]]
-Relevant video search: "${query} ${gc.courseContext} explanation"
-
-STRICT: No greetings. No "Namaste". No intro fluff. No code unless the frame itself is a code snippet.`;
+STRICT: No greetings. No "Namaste". No intro fluff. No code unless the selection itself is a code snippet. No summary headings.`;
         } else {
             // Adaptive General Prompt
             systemPrompt = `You are a professional academic mentor. Provide a high-quality, relevant response.
@@ -362,28 +363,24 @@ STRICT: No greetings. No "Namaste". No intro fluff. No code unless the frame its
 LANGUAGE RULES:
 ${languageInstruction}
 
-ADAPTIVE STRUCTURE (Use ONLY these markers):
-1. **Concept Question** (Theory):
-   Structure: [[INTRO]] -> [[CONCEPT]] -> [[SUMMARY]] -> [[VIDEO: URL]]
-   - Start with a direct professional greeting (no repetition).
-   - Use "### Overview" and "### Real-Life Analogy".
-   - **NO CODE** for theoretical topics like networking or OSI layers unless explicitly asked or required for implementation.
-
-2. **Coding Question** (Practical):
-   Structure: [[INTRO]] -> [[CONCEPT]] -> [[CODE]] -> [[SUMMARY]] -> [[VIDEO: URL]]
-   - Explain the logic with "### Implementation Logic".
-   - **Show code ONLY if it genuinely helps or is requested**.
-   - Use the language requested or the one most relevant to the context.
+ADAPTIVE STRUCTURE:
+[[INTRO]] -> [[CONCEPT]]
+- Start with a direct professional greeting.
+- Provide a direct explanation grounded in ${selectedText || context || 'General curriculum'}.
+- NO timestamp references (e.g., "at 3:50").
+- NO speculative language (no "likely contains", "might be"). Use "The visual shows" or "This structure represents".
+- If the query is theoretical, use conceptual analogies.
+- If the query is practical/coding, show clear snippets only if requested or helpful.
 
 CRITICAL CONSTRAINTS:
+- **NO MENTION OF TIME/TIMESTAMPS** unless explicitly asked.
+- **CONSTRUCTION**: Use extracted transcript, OCR text, and faculty resources provided. 
+- **NO FABRICATION**: If context is missing, ask the student to provide more details or adjust their selection.
 - **NO DUMMY CODE**: Do not simulate networking layers or theory with print statements.
-- **NO FAKE PREVIEWS**: Do not use "Mastery Tutorial" or "100% Satisfaction" labels.
-- **NO UI NOISE**: Do not mention confidence scores or metadata.
-- **STRICT: NO URLs IN TEXT**. Only use [[VIDEO: URL]] at the end.
-- Use ### for Section Headers (will look blue/bold).
-- Use ${userName}'s name only once in the intro.
-
-Current Context: ${selectedText || context || 'General curriculum'}`;
+- **NO UI NOISE**: Do not mention confidence scores, escalation, or metadata.
+- **STRICT: NO URLs IN TEXT**. The system attaches verified video tutorials automatically.
+- Use ### for Section Headers. No repetitive summary templates or fixed endings.
+- Use ${userName}'s name once in the greeting.`;
         }
 
         const messages = [];
