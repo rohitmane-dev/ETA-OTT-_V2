@@ -5,6 +5,7 @@ import { Send, Bot, User, Loader2, Volume2, Sparkles, AlertCircle, ArrowUpRight,
 import ReactPlayer from 'react-player';
 import apiClient from '../api/axios.config';
 import toast from 'react-hot-toast';
+import GroqKeyModal from './GroqKeyModal';
 
 const formatMessage = (content) => {
     if (!content) return null;
@@ -12,8 +13,10 @@ const formatMessage = (content) => {
     // Clean up markers and video links so they don't show as raw text
     const cleanContent = content
         .replace(/\[\[(INTRO|CONCEPT|CODE|SUMMARY)\]\]/g, '')
-        .replace(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/g, '')
-        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/g, '') // Remove standalone YouTube URLs
+        .replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '') // Strips [[VIDEO: URL]]
+        .replace(/(Video|Relevant video|Suggested video):\s*https?:\/\/[^\s]+/gi, '') // Strips prefixed URLs
+        .replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s\[\]"'>]+/g, '') // Robust YouTube stripping
+        .replace(/https?:\/\/[^\s\[\]"'>]+/g, '') // General URL stripping to be safe
         .trim();
 
     if (!cleanContent) return null;
@@ -84,20 +87,23 @@ const formatMessage = (content) => {
             return;
         }
 
-        // Handle ### Headers (Bold for Title)
+        // Handle ### Headers (Premium Blue Styling)
         if (trimmedLine.startsWith('### ')) {
             elements.push(
-                <h3 key={lineIndex} className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-8 mb-4">
-                    {trimmedLine.replace(/^### /, '')}
-                </h3>
+                <div key={lineIndex} className="relative group mt-10 mb-6">
+                    <h3 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-blue-500 dark:from-blue-400 dark:to-blue-200 tracking-tight">
+                        {trimmedLine.replace(/^### /, '')}
+                    </h3>
+                    <div className="absolute -bottom-2 left-0 w-12 h-1 bg-gradient-to-r from-blue-600 to-transparent rounded-full transform origin-left group-hover:scale-x-150 transition-transform duration-500" />
+                </div>
             );
             return;
         }
 
-        // Handle #### Subheaders
+        // Handle #### Subheaders (Semibold Blue)
         if (trimmedLine.startsWith('#### ')) {
             elements.push(
-                <h4 key={lineIndex} className="text-base font-semibold text-blue-600 dark:text-blue-400 mt-6 mb-3">
+                <h4 key={lineIndex} className="text-sm font-bold text-blue-600/80 dark:text-blue-400 mt-8 mb-3 uppercase tracking-wider">
                     {trimmedLine.replace(/^#### /, '')}
                 </h4>
             );
@@ -197,12 +203,12 @@ const StageItem = memo(({ type, content, video, isFinal }) => {
 
             {isFinal && video && (
                 <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full">
-                    <div className="p-3 bg-red-500/5 border-b flex items-center justify-between">
+                    <div className="p-3 bg-blue-500/5 border-b flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <div className="p-1 bg-red-500 rounded-lg shrink-0">
+                            <div className="p-1 bg-blue-500 rounded-lg shrink-0">
                                 <Youtube className="w-4 h-4 text-white" />
                             </div>
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-red-600 truncate">Mastery Tutorial</span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 truncate">Recommended Tutorial</span>
                         </div>
                     </div>
                     <div className="w-full relative bg-black aspect-video">
@@ -251,25 +257,32 @@ const SequentialFlow = ({ content, onComplete, scrollRef, speak }) => {
             const endPos = findNextMarker(next.pos + next.marker.length);
             const raw = content.substring(next.pos + next.marker.length, endPos.pos === -1 ? content.length : endPos.pos).trim();
 
-            const videoMatch = raw.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
-            const cleanRaw = raw.replace(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/g, '').trim();
+            const videoMatchInside = raw.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
+            const videoMatchRaw = raw.match(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/);
+
+            const videoUrl = videoMatchInside ? videoMatchInside[1] : (videoMatchRaw ? videoMatchRaw[0] : null);
+            const cleanRaw = raw.replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '').replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/g, '').trim();
 
             parts.push({
                 type: next.marker.replace(/\[\[|\]\]/g, ''),
                 content: cleanRaw,
-                video: videoMatch ? videoMatch[1] : null
+                video: videoUrl
             });
 
             next = endPos;
         }
 
         if (parts.length === 0) {
-            const videoMatch = content.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
-            const cleanContent = content.replace(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/g, '').trim();
+            const videoMatchInside = content.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
+            const videoMatchRaw = content.match(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/);
+
+            const videoUrl = videoMatchInside ? videoMatchInside[1] : (videoMatchRaw ? videoMatchRaw[0] : null);
+            const cleanContent = content.replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '').replace(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/g, '').trim();
+
             parts.push({
                 type: 'CONCEPT',
                 content: cleanContent,
-                video: videoMatch ? videoMatch[1] : null
+                video: videoUrl
             });
         }
 
@@ -299,40 +312,59 @@ const SequentialFlow = ({ content, onComplete, scrollRef, speak }) => {
                 setCodeTypingSpeed(45);
             }
 
-            // Speak non-code stages while typing for simultaneous explanation
-            if (stage.type !== 'CODE') {
-                speak(stage.content, `stage-${currentStageIndex}`);
-            }
-
             let charIndex = 0;
             const textToType = stage.content;
-            const timer = setInterval(() => {
+
+            // Higher performance typing with slower updates but larger chunks
+            // This gives the browser's speech engine more airtime
+            const typingInterval = stage.type === 'CODE' ? 40 : 60;
+
+            // Initialize speech with a slight delay to allow typing render to stabilize
+            let speechTimer = null;
+            if (stage.type !== 'CODE') {
+                speechTimer = setTimeout(() => {
+                    speak(stage.content, `stage-${currentStageIndex}`);
+                }, 200);
+            }
+
+            let timer = null;
+            const typeNext = () => {
                 if (charIndex < textToType.length) {
-                    // Optimized batching: type more characters at once for longer text to reduce React work
-                    let chunkSize = 1;
-                    if (textToType.length > 800) chunkSize = 3;
-                    else if (textToType.length > 400) chunkSize = 2;
+                    // Aggressive chunking to minimize React work
+                    let chunkSize = stage.type === 'CODE' ? 8 : 4;
+                    if (textToType.length > 800) chunkSize = 12;
+                    else if (textToType.length > 400) chunkSize = 8;
 
                     const slice = textToType.substring(charIndex, charIndex + chunkSize);
                     setTypingText(prev => prev + slice);
                     charIndex += chunkSize;
 
                     if (scrollRef.current) {
-                        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                        requestAnimationFrame(() => {
+                            if (scrollRef.current) {
+                                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                            }
+                        });
                     }
+                    timer = setTimeout(typeNext, typingInterval);
                 } else {
-                    clearInterval(timer);
                     setIsTyping(false);
                     setVisibleStages(prev => [...prev, { ...stage, finalContent: textToType }]);
                     setCurrentStageIndex(prev => prev + 1);
                 }
-            }, stage.type === 'CODE' ? codeTypingSpeed : 45);
+            };
 
-            return () => clearInterval(timer);
+            // Start typing
+            timer = setTimeout(typeNext, 50);
+
+            return () => {
+                if (timer) clearTimeout(timer);
+                if (speechTimer) clearTimeout(speechTimer);
+            };
         } else {
             if (onComplete) onComplete();
         }
-    }, [currentStageIndex, stages, speak, onComplete, scrollRef]);
+    }, [currentStageIndex, stages, onComplete]);
 
     return (
         <div className="space-y-4">
@@ -376,6 +408,9 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
     const [speaking, setSpeaking] = useState(null); // ID of message being spoken
     const [voices, setVoices] = useState([]);
     const [selectedVoice, setSelectedVoice] = useState(null);
+    const [showGroqModal, setShowGroqModal] = useState(false);
+    const [groqModalReason, setGroqModalReason] = useState(null);
+    const [interactionCount, setInteractionCount] = useState(parseInt(localStorage.getItem('ai_interaction_count') || '0'));
     const scrollRef = useRef(null);
     const recognitionRef = useRef(null);
     const audioRef = useRef(null);
@@ -456,25 +491,10 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
         }
     }, [isParentActive]);
 
-    // Localized dynamic welcome message
+    // Localized dynamic welcome message removed (Rule 9/4)
     useEffect(() => {
-        if (messages.length === 0) {
-            const resourceName = contentTitle ? `"${contentTitle}"` : 'this lesson';
-
-            const welcomeText = targetLanguage === 'hindi'
-                ? `[[INTRO]] Suno ${userName}! Aaj hum ${resourceName} ke baare mein seekhenge.\n\n[[CONCEPT]] Main aapka **personal AI Friend** hoon. Coding ho ya theory, main aapko ek dost ki tarah basic se advanced tak sab samjhaunga. Bina kisi tension ke puchiye!\n\n[[SUMMARY]] Chalo, start karein? Bataiye aaj aapka pehla sawal kya hai?`
-                : `[[INTRO]] Hey ${userName}, let's master ${resourceName}!\n\n[[CONCEPT]] I'm your **personal AI Mentor**. Think of me as a friend who helps you out right before an exam. I'll break down even the hardest code into simple, chill concepts.\n\n[[SUMMARY]] Ready to dive in? What's on your mind today?`;
-
-            const welcomeMsg = {
-                role: 'assistant',
-                content: welcomeText,
-                id: 'welcome',
-                isTyping: true
-            };
-
-            setMessages([welcomeMsg]);
-        }
-    }, [targetLanguage, userName, contentTitle, messages.length]);
+        // Start empty for a cleaner interface
+    }, []);
 
     // Effect to auto-select best voice when language changes
     useEffect(() => {
@@ -555,13 +575,33 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                 doubtId: doubt._id,
                 isTyping: true,
                 confidence: doubt.confidence || 95,
-                source: source
+                source: source,
+                pendingVideo: doubt.suggestedVideo
             }]);
 
         } catch (error) {
             console.error('AI Tutor error:', error);
-            toast.error('Failed to get answer from AI Tutor');
+
+            if (error.response?.data?.errorCode) {
+                const errorCode = error.response.data.errorCode;
+                if (errorCode === 'API_LIMIT_REACHED' || errorCode === 'INVALID_API_KEY' || errorCode === 'NO_API_KEY') {
+                    setGroqModalReason(errorCode);
+                    setShowGroqModal(true);
+                    return;
+                }
+            }
+
+            toast.error(error.response?.data?.message || 'Failed to get answer from AI Tutor');
         } finally {
+            const newCount = interactionCount + 1;
+            setInteractionCount(newCount);
+            localStorage.setItem('ai_interaction_count', newCount.toString());
+
+            // Show modal every 5 interactions if not configured
+            if (newCount % 5 === 0 && !user?.groqApiKey) {
+                setShowGroqModal(true);
+            }
+
             setLoading(false);
         }
     };
@@ -591,7 +631,8 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
     const speak = useCallback(async (text, id) => {
         // Clean text for speech - remove markers, code blocks, and formatting
         const cleanText = text
-            .replace(/\[\[VIDEO:\s*https?:\/\/[^\]]+\]\]/g, '') // Remove video URLs
+            .replace(/\[\[VIDEO:?\s*[^\]]*\]\]/g, '') // Remove video markers
+            .replace(/https?:\/\/[^\s\[\]"'>]+/g, '') // Remove raw URLs
             .replace(/\[\[(INTRO|CONCEPT|CODE|SUMMARY)\]\]/g, '') // Remove stage markers
             .replace(/```[\s\S]*?```/g, '... code snippet ... ') // Replace code blocks with placeholder
             .replace(/####\s+(.+)/g, '$1. ') // Convert h4 to spoken text
@@ -602,17 +643,16 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
             .replace(/\s+/g, ' ') // Normalize whitespace
             .trim();
 
+        if (!cleanText) return;
+
         window.speechSynthesis.cancel();
         if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current = null;
         }
 
-        if (speaking === id) {
-            setSpeaking(null);
-            return;
-        }
-
+        // We use a local check instead of dependening on speaking state
+        // to keep the speak function reference stable
         if (selectedVoice?.isExpert) {
             try {
                 setSpeaking(id);
@@ -656,7 +696,7 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
         utterance.onerror = () => setSpeaking(null);
 
         window.speechSynthesis.speak(utterance);
-    }, [speaking, selectedVoice, targetLanguage]);
+    }, [selectedVoice, targetLanguage]);
 
     const stopAI = () => {
         window.speechSynthesis.cancel();
@@ -780,24 +820,56 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                                         />
                                     ) : (
                                         <>
-                                            {formatMessage(msg.content)}
-                                            {/* Show video for completed messages */}
-                                            {(() => {
-                                                const videoMatch = msg.content.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
-                                                if (videoMatch) {
+                                            {msg.isVideoMessage && msg.suggestedVideo && (
+                                                <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full">
+                                                    <div className="p-3 bg-blue-500/5 border-b flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="p-1 bg-blue-500 rounded-lg shrink-0">
+                                                                <Youtube className="w-4 h-4 text-white" />
+                                                            </div>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 truncate">Recommended Tutorial</span>
+                                                                {msg.suggestedVideo.searchQuery && (
+                                                                    <span className="text-[8px] text-muted-foreground italic">Search: "{msg.suggestedVideo.searchQuery}"</span>
+                                                                )}
+                                                                {msg.suggestedVideo.views && (
+                                                                    <span className="text-[8px] text-muted-foreground">{msg.suggestedVideo.views.toLocaleString()} views</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-full relative bg-black aspect-video">
+                                                        <ReactPlayer
+                                                            url={msg.suggestedVideo.url}
+                                                            width="100%"
+                                                            height="100%"
+                                                            style={{ position: 'absolute', top: 0, left: 0 }}
+                                                            controls={true}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {!msg.isVideoMessage && formatMessage(msg.content)}
+                                            {/* Show video for completed messages - Robust extraction */}
+                                            {!msg.isVideoMessage && (() => {
+                                                const videoMatchInside = msg.content?.match(/\[\[VIDEO:\s*(https?:\/\/[^\]]+)\]\]/);
+                                                const videoMatchRaw = msg.content?.match(/https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+/);
+                                                const videoUrl = videoMatchInside ? videoMatchInside[1] : (videoMatchRaw ? videoMatchRaw[0] : null);
+
+                                                if (videoUrl) {
                                                     return (
                                                         <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full">
-                                                            <div className="p-3 bg-red-500/5 border-b flex items-center justify-between">
+                                                            <div className="p-3 bg-blue-500/5 border-b flex items-center justify-between">
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className="p-1 bg-red-500 rounded-lg shrink-0">
+                                                                    <div className="p-1 bg-blue-500 rounded-lg shrink-0">
                                                                         <Youtube className="w-4 h-4 text-white" />
                                                                     </div>
-                                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-red-600 truncate">Mastery Tutorial</span>
+                                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 truncate">Related Content</span>
                                                                 </div>
                                                             </div>
                                                             <div className="w-full relative bg-black aspect-video">
                                                                 <ReactPlayer
-                                                                    url={videoMatch[1]}
+                                                                    url={videoUrl}
                                                                     width="100%"
                                                                     height="100%"
                                                                     style={{ position: 'absolute', top: 0, left: 0 }}
@@ -812,68 +884,84 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                                         </>
                                     )}
 
-                                    {msg.role === 'assistant' && !msg.isTyping && (
-                                        <div className="mt-4 flex flex-col gap-4">
-                                            {/* Confidence & Actions Bar */}
-                                            <div className="flex items-center justify-between border-t border-border/50 pt-4 mt-2">
+                                    {msg.role === 'assistant' && !msg.isTyping && !msg.isVideoMessage && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 5 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className={`mt-4 p-4 rounded-2xl transition-all border ${msg.source === 'KNOWLEDGE_GRAPH'
+                                                ? 'bg-emerald-500/5 dark:bg-emerald-500/5 border-emerald-500/30'
+                                                : 'bg-white/5 dark:bg-black/20 dark:border-white/5 border-white/10'
+                                                } backdrop-blur-md shadow-inner`}
+                                        >
+                                            <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
-                                                    {/* Confidence Meter */}
-                                                    <div className="flex items-center gap-2 group cursor-help" title={`AI Confidence: ${msg.confidence || 95}%`}>
-                                                        <div className="relative w-8 h-8 flex items-center justify-center">
-                                                            <svg className="w-full h-full transform -rotate-90">
-                                                                <circle
-                                                                    cx="16" cy="16" r="14"
-                                                                    fill="none" stroke="currentColor" strokeWidth="2"
-                                                                    className="text-muted-foreground/10"
-                                                                />
-                                                                <circle
-                                                                    cx="16" cy="16" r="14"
-                                                                    fill="none" stroke="currentColor" strokeWidth="2"
-                                                                    strokeDasharray={88}
-                                                                    strokeDashoffset={88 - (88 * (msg.confidence || 95)) / 100}
-                                                                    className={(msg.confidence || 95) > 90 ? "text-blue-500" : "text-yellow-500"}
-                                                                />
-                                                            </svg>
-                                                            <span className="absolute text-[8px] font-bold">
-                                                                {msg.confidence || 95}%
+                                                    {msg.source === 'KNOWLEDGE_GRAPH' ? (
+                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
+                                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-tight">
+                                                                Retrieved from Knowledge Graph
                                                             </span>
                                                         </div>
-                                                        {msg.source === 'graph_db' && (
-                                                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded-full">
-                                                                <CheckCircle2 className="w-3 h-3 text-blue-500" />
-                                                                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-tighter">Verified</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Escalation Button */}
-                                                    {!msg.escalated && (
-                                                        <button
-                                                            onClick={() => handleEscalate(msg.doubtId, msg.id)}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/5 hover:bg-primary/10 text-primary border border-primary/20 rounded-xl transition-all text-[10px] font-bold uppercase tracking-wider group"
-                                                        >
-                                                            <AlertCircle className="w-3 h-3 group-hover:rotate-12 transition-transform" />
-                                                            Ask Mentor
-                                                        </button>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
+                                                            <Bot className="w-3.5 h-3.5 text-blue-500" />
+                                                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">
+                                                                AI Mentor Powered
+                                                            </span>
+                                                        </div>
                                                     )}
-                                                    {msg.escalated && (
-                                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 text-green-600 border border-green-500/20 rounded-xl text-[10px] font-bold uppercase tracking-wider">
-                                                            <CheckCircle2 className="w-3 h-3" />
-                                                            Escalated
+
+                                                    {msg.confidence && (
+                                                        <div className={`px-2 py-1 rounded-lg text-[10px] font-bold ${msg.confidence >= 90 ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
+                                                            msg.confidence >= 80 ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20' :
+                                                                msg.confidence >= 70 ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' :
+                                                                    'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+                                                            }`}>
+                                                            Accuracy: {Math.round(msg.confidence)}%
                                                         </div>
                                                     )}
                                                 </div>
 
-                                                {/* Voice Action */}
-                                                <button
-                                                    onClick={() => speak(msg.content, msg.id)}
-                                                    className={`p-2 rounded-xl transition-all ${speaking === msg.id ? 'bg-primary text-white shadow-lg' : 'hover:bg-primary/10 text-primary'}`}
-                                                    title="Listen again"
-                                                >
-                                                    <Volume2 className={`w-4 h-4 ${speaking === msg.id ? 'animate-pulse' : ''}`} />
-                                                </button>
+                                                {/* Action Buttons (Escalate & Voice) */}
+                                                <div className="flex items-center gap-2">
+                                                    {!msg.escalated ? (
+                                                        <button
+                                                            onClick={() => handleEscalate(msg.doubtId, msg.id)}
+                                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all text-[10px] font-bold border ${msg.confidence >= 90 ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500 hover:text-white' :
+                                                                msg.confidence >= 80 ? 'bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500 hover:text-white' :
+                                                                    msg.confidence >= 70 ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500 hover:text-white font-black' :
+                                                                        'bg-rose-500/10 text-rose-600 border-rose-500/20 hover:bg-rose-500 hover:text-white font-black animate-pulse'
+                                                                }`}
+                                                            title={msg.confidence < 80 ? "Low confidence - Highly recommended to escalate" : "Need more help? Escalate to your mentor"}
+                                                        >
+                                                            <ArrowUpRight className="w-3.5 h-3.5" />
+                                                            <span>{msg.confidence < 80 ? "Escalate to Mentor" : "Escalate"}</span>
+                                                        </button>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-600 rounded-full text-[10px] font-bold border border-emerald-500/20">
+                                                            <CheckCircle2 className="w-3.5 h-3.5" />
+                                                            <span>Escalated</span>
+                                                        </div>
+                                                    )}
+
+                                                    <button
+                                                        onClick={() => speak(msg.content, msg.id)}
+                                                        className={`p-2 rounded-xl transition-all ${speaking === msg.id ? 'bg-primary text-white shadow-lg' : 'hover:bg-primary/10 text-primary'}`}
+                                                        title="Listen again"
+                                                    >
+                                                        <Volume2 className={`w-4 h-4 ${speaking === msg.id ? 'animate-pulse' : ''}`} />
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
+
+                                            {/* Low Confidence Warning (Still show as a hint if applicable) */}
+                                            {msg.confidence < 80 && !msg.escalated && (
+                                                <div className="mt-3 py-1.5 px-3 bg-amber-500/5 rounded-lg border border-amber-500/10 flex items-center gap-2">
+                                                    <AlertCircle className="w-3 h-3 text-amber-500" />
+                                                    <span className="text-[10px] text-amber-600 font-medium italic">AI is slightly uncertain about this topic. You might want to escalate.</span>
+                                                </div>
+                                            )}
+                                        </motion.div>
                                     )}
                                 </div>
                             </div>
@@ -889,7 +977,7 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                             </div>
                             <div className="py-2 px-4 flex items-center gap-2 text-muted-foreground italic text-xs">
                                 <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                                Analyzing concept and preparing mentorship session...
+                                Analyzing and preparing context-aware response...
                             </div>
                         </div>
                     </div>
@@ -965,6 +1053,16 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                     Powered by Groq Llama • Learned through Knowledge Graph
                 </div>
             </div>
+            {/* Groq API Key Config Modal */}
+            <GroqKeyModal
+                isOpen={showGroqModal}
+                onClose={() => setShowGroqModal(false)}
+                onSave={() => {
+                    setShowGroqModal(false);
+                    toast.success('AI Session recharged! You can try asking again.');
+                }}
+                initialReason={groqModalReason}
+            />
         </div >
     );
 }

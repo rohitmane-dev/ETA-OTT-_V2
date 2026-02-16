@@ -11,22 +11,22 @@ import Content from '../models/Content.model.js';
  */
 export const searchVideos = async (query, userId = null) => {
     try {
-        // Requirement allows searching 'any' video in the search option
         const r = await yts(query);
 
-        // Filter out videos that might not be educational (basic heuristic)
-        // yt-search doesn't provide category, but we can check title/description if needed
-        const videos = r.videos.slice(0, 30).map(v => ({
-            id: v.videoId,
-            url: v.url,
-            title: v.title,
-            description: v.description,
-            thumbnail: v.thumbnail,
-            duration: v.timestamp,
-            views: v.views,
-            ago: v.ago,
-            author: v.author.name
-        }));
+        // Filter and sort by views to ensure high-engagement content (Rule 7)
+        const videos = r.videos.slice(0, 30)
+            .sort((a, b) => b.views - a.views)
+            .map(v => ({
+                id: v.videoId,
+                url: v.url,
+                title: v.title,
+                description: v.description,
+                thumbnail: v.thumbnail,
+                duration: v.timestamp,
+                views: v.views,
+                ago: v.ago,
+                author: v.author.name
+            }));
 
         // Save to search history if userId is provided
         if (userId && query) {

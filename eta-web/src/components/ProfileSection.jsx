@@ -9,6 +9,9 @@ import {
     Book, Code, Heart
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import GroqKeyModal from './GroqKeyModal';
+import { Key, Zap } from 'lucide-react';
+import { useEffect } from 'react';
 
 export default function ProfileSection() {
     const { user, updateProfile } = useAuth();
@@ -19,6 +22,7 @@ export default function ProfileSection() {
     const [selectedVariation, setSelectedVariation] = useState(null);
     const fileInputRef = useRef(null);
     const bannerInputRef = useRef(null);
+    const [showKeyModal, setShowKeyModal] = useState(false);
 
     const [formData, setFormData] = useState({
         name: user?.profile?.name || '',
@@ -513,6 +517,41 @@ export default function ProfileSection() {
 
                 {/* Right Column - Stats & Badges */}
                 <div className="space-y-6">
+                    {/* AI Configuration Section */}
+                    <div className="card p-6 border-primary/20 bg-primary/5">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-primary/10 rounded-lg">
+                                <Zap className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-sm">AI Infrastructure</h3>
+                                <p className="text-[10px] text-muted-foreground">Manage your personal AI Mentor limits</p>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-background/50 rounded-2xl border border-primary/10 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium">Groq API Key</span>
+                                {user?.groqApiKey ? (
+                                    <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                        <Check className="w-2.5 h-2.5" /> Configured
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full">
+                                        Not Configured
+                                    </span>
+                                )}
+                            </div>
+                            <button
+                                onClick={() => setShowKeyModal(true)}
+                                className="w-full py-3 bg-primary text-white rounded-xl text-xs font-bold hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
+                            >
+                                <Key className="w-3.5 h-3.5" />
+                                {user?.groqApiKey ? 'Update API Key' : 'Configure Personal Key'}
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="card p-6 space-y-4">
                         <h3 className="font-bold flex items-center gap-2">
                             <Shield className="w-5 h-5 text-primary" />
@@ -556,6 +595,15 @@ export default function ProfileSection() {
                     </div>
                 </div>
             </div>
+            {/* Groq Key Modal */}
+            <GroqKeyModal
+                isOpen={showKeyModal}
+                onClose={() => setShowKeyModal(false)}
+                onSave={() => {
+                    setShowKeyModal(false);
+                    // Force refresh user data if possible, or trust updateProfile
+                }}
+            />
         </div>
     );
 }

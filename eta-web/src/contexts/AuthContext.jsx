@@ -185,7 +185,8 @@ export function AuthProvider({ children }) {
         login,
         loginWithGoogle,
         logout,
-        updateProfile
+        updateProfile,
+        updateUser: setUser
     };
 
     return (

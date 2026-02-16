@@ -120,7 +120,7 @@ router.post('/verify-token', async (req, res) => {
         const { token } = req.body;
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId).select('-__v');
+        const user = await User.findById(decoded.userId).select('-__v +groqApiKey');
 
         if (!user) {
             return res.status(404).json({
@@ -151,7 +151,7 @@ router.get('/profile', async (req, res) => {
 
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId).select('-__v');
+        const user = await User.findById(decoded.userId).select('-__v +groqApiKey');
 
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -227,6 +227,8 @@ router.put('/profile', authenticate, attachUser, upload.fields([
                     profile: user.profile,
                     institutionIds: user.institutionIds,
                     branchIds: user.branchIds,
+                    groqApiKey: user.groqApiKey,
+                    aiOnboarding: user.aiOnboarding,
                     createdAt: user.createdAt
                 }
             }

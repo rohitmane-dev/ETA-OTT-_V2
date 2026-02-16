@@ -127,6 +127,54 @@ const calculateConfidence = (params) => {
     };
 };
 
+// Helper to get embeddings from ML service (Rule 1)
+const getEmbedding = async (text) => {
+    try {
+        const response = await axios.post('http://localhost:8000/embeddings', { text });
+        return response.data.success ? response.data.embedding : null;
+    } catch (error) {
+        console.warn('Embedding service unavailable:', error.message);
+        return null;
+    }
+};
+
+/**
+ * Search Knowledge Graph for semantic match (Rule 1 & 2)
+ */
+export const searchKnowledgeGraph = async (query, courseId = null) => {
+    try {
+        const embedding = await getEmbedding(query);
+        if (!embedding) return { match: false, confidence: 0 };
+
+        // Neo4j Vector Search (Using vector index if exists, or fallback)
+        // Note: Assumes index 'doubt_vector_index' exists as per Rule 1 Architecture
+        const cypher = `
+            CALL db.index.vector.queryNodes('doubt_vector_index', 5, $embedding)
+            YIELD node, score
+            WHERE score >= 0.80
+            MATCH (node)-[:ANSWERS]->(a:Answer)
+            RETURN node.text as question, a.text as answer, score * 100 as confidence
+            ORDER BY score DESC LIMIT 1
+        `;
+
+        const result = await runNeo4jQuery(cypher, { embedding, courseId });
+        if (result.records.length > 0) {
+            const record = result.records[0];
+            return {
+                match: true,
+                question: record.get('question'),
+                answer: record.get('answer'),
+                confidence: record.get('confidence'),
+                source: 'KNOWLEDGE_GRAPH'
+            };
+        }
+        return { match: false, confidence: 0 };
+    } catch (error) {
+        console.warn('Knowledge Graph search failed:', error.message);
+        return { match: false, confidence: 0 };
+    }
+};
+
 export const searchExistingDoubts = async (query, context = '', contentId = null) => {
     try {
         const searchKey = `${query.toLowerCase().trim()}${context ? '|' + context.toLowerCase().trim() : ''}`;
@@ -177,10 +225,76 @@ export const searchExistingDoubts = async (query, context = '', contentId = null
 /**
  * Call Groq Llama to answer a doubt
  */
-export const askGroq = async (query, context = '', visualContext = null, contentUrl = null, contentType = null, language = 'english', userName = 'Student', selectedText = '') => {
+/**
+ * Save high-confidence resolution to Knowledge Graph (Rule 3 & 5)
+ */
+export const saveToKnowledgeGraph = async (params) => {
+    const { query, answer, confidence, courseId, contentId, context, selectedText } = params;
+
+    // Confidence threshold check (Rule 3)
+    if (confidence < 85) return null;
+
+    try {
+        const embedding = await getEmbedding(query);
+        if (!embedding) return null;
+
+        const cypher = `
+            MERGE (q:Question {text: $query})
+            SET q.embedding = $embedding, q.timestamp = datetime()
+            
+            MERGE (a:Answer {text: $answer})
+            SET a.confidence = $confidence, a.source = "AI_GENERATED", a.timestamp = datetime()
+            
+            MERGE (q)-[:ANSWERS]->(a)
+            
+            WITH q, a
+            MATCH (c:Course {id: $courseId})
+            MERGE (q)-[:RELATES_TO]->(c)
+            
+            // Link to specific content resource if available
+            WITH q, a, c
+            MATCH (r:Content {id: $contentId})
+            MERGE (q)-[:GENERATED_FROM_RESOURCE]->(r)
+
+            // Auto-detect concepts (Basic simulation - Rule 5)
+            WITH q, c
+            UNWIND split($query, ' ') as word
+            WHERE size(word) > 5
+            MERGE (con:Concept {name: apoc.text.capitalize(word)})
+            MERGE (q)-[:RELATES_TO]->(con)
+            MERGE (con)-[:PART_OF]->(c)
+            
+            RETURN q.text as saved
+        `;
+
+        await runNeo4jQuery(cypher, {
+            query,
+            answer,
+            confidence,
+            embedding,
+            courseId,
+            contentId: contentId || '',
+            context: context || '',
+            selectedText: selectedText || ''
+        });
+
+        console.log(`✅ Resolution saved to Knowledge Graph (Confidence: ${confidence}%)`);
+        return true;
+    } catch (error) {
+        console.warn('Failed to save to Knowledge Graph:', error.message);
+        return false;
+    }
+};
+
+export const askGroq = async (query, context = '', visualContext = null, contentUrl = null, contentType = null, language = 'english', userName = 'Student', selectedText = '', userKey = null) => {
     try {
         let spatialInfo = '';
         let isVisionMode = false;
+        const activeApiKey = userKey || GROQ_API_KEY;
+
+        if (!activeApiKey) {
+            throw new Error('NO_API_KEY');
+        }
 
         if (visualContext && contentUrl && contentType === 'image') {
             // Enable vision mode for region-specific visual queries on images
@@ -201,42 +315,76 @@ Act as if you are pointing your finger at that box and teaching the student abou
         let languageInstruction = "";
         if (language.toLowerCase() === 'hindi') {
             languageInstruction = `
-- **STRICT HINGLISH RULE**: Respond only in **conversational Hinglish** (Hindi words in English script).
-- **NO DEVANAGARI**: Strictly no Hindi script characters.
-- **CONCEPTUAL TEACHING**: Never read code line-by-line. Instead of saying "System.out.println", say "Yahan hum monitor pe output dikha rahe hain".
-- **TONE**: Professional but friendly tutor. Use student's name naturally. No "Arre bhai" or "Dost" - use their actual name.`;
+- **LANGUAGE**: STRICT HINGLISH ONLY (Hindi words in English script).
+- **CRITICAL**: No Devanagari characters (हिंदी नहीं).
+- **TONE**: Natural, conversational, and direct. Avoid over-formal "Shuddh Hindi".
+- **GREETING**: Professional one-line greeting using ${userName}'s name. No repetitive templates.`;
         } else {
             languageInstruction = `
-- **STRICT ENGLISH RULE**: Respond fully in English.
-- **CONCEPTUAL TEACHING**: Explain why we use a block of code, not exactly what characters are typed. Talk about entry points, logic flows, and purpose.
-- **TONE**: Professional but conversational mentor. Use student's name naturally.`;
+- **LANGUAGE**: FULL ENGLISH ONLY.
+- **CRITICAL**: No Hinglish mixing. No "samajh aaya?".
+- **TONE**: Professional academic mentor.
+- **GREETING**: Professional one-line greeting using ${userName}'s name. No repetitive templates.`;
         }
 
-        const systemPrompt = `You are a professional coding mentor for ${userName}. Explain concepts clearly using clean markdown.
+        const isStrictRegion = context.startsWith('STRICT_REGION_CONTEXT:');
+        let systemPrompt = "";
 
-MANDATORY STRUCTURE (use these markers):
-[[INTRO]] - Greet ${userName} by name and introduce the topic warmly.
-[[CONCEPT]] - Main teaching section:
-   • Start with "### Concept Overview" heading (blue, bold)
-   • Explain the concept conceptually BEFORE showing code
-   • If showing code, add "### Code Breakdown" heading AFTER the code block
-   • In the breakdown, explain the LOGIC and FLOW, not syntax
-[[CODE]] - Code snippet in triple backticks with language specified
-[[SUMMARY]] - Brief recap with "### Key Takeaways" heading
-[[VIDEO: URL]] - MUST include one highly-viewed YouTube tutorial
+        // Intelligence check for query type
+        const isCodingQuery = /code|programming|java|python|javascript|script|algorithm|function|class/i.test(query) || /code|programming/i.test(selectedText);
+        const isExplicitCodeRequest = /show\s+code|example\s+in|write\s+a\s+program|snippet/i.test(query);
 
-CRITICAL RULES:
-1. **Use ${userName}'s name** naturally in the intro
-2. **Headings**: Use ### for main sections, #### for subsections (will render blue and bold)
-3. **Code Explanation**: Explain WHAT the code does and WHY, not HOW to type it
-4. **No Syntax Reading**: Don't say "for loop" - say "iterate through each element"
-5. **Confident Tone**: Answer definitively. No uncertainty, no confidence scores, no "verify with mentor"
-6. **Clean Structure**: Follow the exact order: Intro → Concept → Code → Summary → Video
+        if (isStrictRegion) {
+            const rawGrounding = context.replace('STRICT_REGION_CONTEXT: ', '');
+            let gc = { transcriptSegment: '', selectedTimestamp: '', courseContext: '', facultyResources: '' };
+            try { gc = JSON.parse(rawGrounding); } catch (e) { }
 
+            systemPrompt = `You are an expert precision tutor. The student is focusing on a SPECIFIC visual region at timestamp ${gc.selectedTimestamp}.
+
+[[CONCEPT]] 
+Start directly with "### What You Are Seeing in This Frame". 
+- Explain visual elements, nodes, or diagrams in this specific box. 
+- Ground your analysis in this transcript segment: "${gc.transcriptSegment}".
+- Add "### Explanation of Key Elements" to break down specific details.
+- Add "### How It Connects to Topic" to link this image to ${gc.courseContext}.
+
+[[SUMMARY]]
+Provide a "### Quick Clarity Summary".
+
+[[VIDEO: URL]]
+Relevant video search: "${query} ${gc.courseContext} explanation"
+
+STRICT: No greetings. No "Namaste". No intro fluff. No code unless the frame itself is a code snippet.`;
+        } else {
+            // Adaptive General Prompt
+            systemPrompt = `You are a professional academic mentor. Provide a high-quality, relevant response.
+
+LANGUAGE RULES:
 ${languageInstruction}
 
-Current Resource: ${selectedText || context || 'General curriculum'}
-Highlighted Context: ${selectedText || 'Main topic'}`;
+ADAPTIVE STRUCTURE (Use ONLY these markers):
+1. **Concept Question** (Theory):
+   Structure: [[INTRO]] -> [[CONCEPT]] -> [[SUMMARY]] -> [[VIDEO: URL]]
+   - Start with a direct professional greeting (no repetition).
+   - Use "### Overview" and "### Real-Life Analogy".
+   - **NO CODE** for theoretical topics like networking or OSI layers unless explicitly asked or required for implementation.
+
+2. **Coding Question** (Practical):
+   Structure: [[INTRO]] -> [[CONCEPT]] -> [[CODE]] -> [[SUMMARY]] -> [[VIDEO: URL]]
+   - Explain the logic with "### Implementation Logic".
+   - **Show code ONLY if it genuinely helps or is requested**.
+   - Use the language requested or the one most relevant to the context.
+
+CRITICAL CONSTRAINTS:
+- **NO DUMMY CODE**: Do not simulate networking layers or theory with print statements.
+- **NO FAKE PREVIEWS**: Do not use "Mastery Tutorial" or "100% Satisfaction" labels.
+- **NO UI NOISE**: Do not mention confidence scores or metadata.
+- **STRICT: NO URLs IN TEXT**. Only use [[VIDEO: URL]] at the end.
+- Use ### for Section Headers (will look blue/bold).
+- Use ${userName}'s name only once in the intro.
+
+Current Context: ${selectedText || context || 'General curriculum'}`;
+        }
 
         const messages = [];
 
@@ -269,25 +417,47 @@ Highlighted Context: ${selectedText || 'Main topic'}`;
         const response = await axios.post(
             GROQ_API_URL,
             {
-                model: activeModel,
+                model: isVisionMode ? (process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview') : GROQ_MODEL,
                 messages: messages,
                 temperature: 0.6,
                 max_tokens: 2048
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Authorization': `Bearer ${activeApiKey}`,
                     'Content-Type': 'application/json'
                 },
                 timeout: 30000
             }
-        );
+        ).catch(err => {
+            if (err.response?.status === 413 || err.response?.status === 429) {
+                throw new Error('API_LIMIT_REACHED');
+            }
+            if (err.response?.status === 401) {
+                throw new Error('INVALID_API_KEY');
+            }
+            throw err;
+        });
 
         const rawContent = response.data.choices[0].message.content;
+        const hasFormatting = checkFormattingQuality(rawContent);
+
+        // Calculate dynamic confidence score (Rule 7)
+        const confidenceResult = calculateConfidence({
+            aiConfidence: 85, // Base assumption for 70b-versatile
+            hasContext: !!context,
+            hasSelectedText: !!selectedText,
+            hasVisualContext: !!visualContext,
+            isVisionMode,
+            responseLength: rawContent.length,
+            hasFormatting,
+            contentType
+        });
 
         return {
             explanation: rawContent,
-            confidence: 100, // Fixed as display is removed
+            confidence: confidenceResult.finalScore,
+            confidenceBreakdown: confidenceResult.breakdown,
             source: isVisionMode ? 'groq_vision' : 'groq_llama'
         };
     } catch (error) {
@@ -318,5 +488,7 @@ export const saveDoubtToGraph = async (query, answer, confidence, context = '', 
 export default {
     searchExistingDoubts,
     askGroq,
-    saveDoubtToGraph
+    saveDoubtToGraph,
+    searchKnowledgeGraph,
+    saveToKnowledgeGraph
 };

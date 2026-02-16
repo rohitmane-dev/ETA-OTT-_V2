@@ -115,7 +115,26 @@ const userSchema = new mongoose.Schema({
             type: Date,
             default: Date.now
         }
-    }]
+    }],
+    groqApiKey: {
+        type: String,
+        default: null,
+        select: false // Hide by default for security
+    },
+    aiOnboarding: {
+        lastModalShown: {
+            type: Date,
+            default: null
+        },
+        interactionCount: {
+            type: Number,
+            default: 0
+        },
+        skipCount: {
+            type: Number,
+            default: 0
+        }
+    }
 }, {
     timestamps: true
 });

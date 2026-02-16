@@ -28,6 +28,23 @@ class ExtractionResponse(BaseModel):
 async def root():
     return {"status": "online", "message": "Eta ML Service is running"}
 
+from sentence_transformers import SentenceTransformer
+
+# Initialize embedding model (Rule 1 & Case 1)
+print("⏳ Loading Embedding model (all-MiniLM-L6-v2)...")
+embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+class EmbeddingRequest(BaseModel):
+    text: str
+
+@app.post("/embeddings")
+def get_embeddings(request: EmbeddingRequest):
+    try:
+        embedding = embed_model.encode(request.text).tolist()
+        return {"success": True, "embedding": embedding}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 @app.post("/extract", response_model=ExtractionResponse)
 def extract_data(request: ExtractionRequest):
     try:
