@@ -3,6 +3,10 @@
 # Multi-stage build for minimal image size
 # ============================================
 
+LABEL maintainer="rohitmane-dev" \
+    app="eta-backend" \
+    description="ETA-OTT Node.js API backend"
+
 # ---------- Stage 1: Install dependencies ----------
 FROM node:22-alpine AS deps
 
@@ -12,11 +16,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Install production dependencies only
-RUN npm install --omit=dev --legacy-peer-deps && \
+RUN npm ci --omit=dev --legacy-peer-deps && \
     npm cache clean --force
 
 # ---------- Stage 2: Production runtime ----------
 FROM node:22-alpine AS runtime
+
+# Install dumb-init for proper PID 1 signal handling (graceful shutdown)
+RUN apk add --no-cache dumb-init
 
 # Security: run as non-root
 RUN addgroup -S etaapp && adduser -S etaapp -G etaapp
@@ -27,13 +34,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy application source
-COPY package.json ./
-COPY server.js ./
-COPY config/ ./config/
-COPY middleware/ ./middleware/
-COPY models/ ./models/
-COPY routes/ ./routes/
-COPY services/ ./services/
+COPY . .
+
+# Remove non-essential files copied in
+RUN rm -rf .dockerignore .gitignore .env .env.* README.md install.log *.log
 
 # Set ownership
 RUN chown -R etaapp:etaapp /app
@@ -50,4 +54,6 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 1
 
+# Use dumb-init as PID 1 for proper signal forwarding
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "server.js"]
