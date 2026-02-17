@@ -1,3 +1,8 @@
+# ============================================
+# ETA-OTT — CI/CD Pipeline
+# Self-hosted runner: Build → Push → Deploy
+# ============================================
+
 name: Deploy to Production
 
 on:
@@ -5,23 +10,96 @@ on:
     branches:
       - deploy
 
-jobs:
-  frontend:
-    name: Deploy Frontend
-    runs-on: [self-hosted, frontend]
-    steps:
-      - name: Pull frontend image
-        run: |
-          cd ~/deploy
-          docker compose pull
-          docker compose up -d --remove-orphans
+env:
+  DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/eta-web
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/eta-backend
 
-  backend:
-    name: Deploy Backend
-    runs-on: [self-hosted, backend]
+jobs:
+  build-push-deploy:
+    name: Build, Push & Deploy
+    runs-on: self-hosted
+    timeout-minutes: 30
+
     steps:
-      - name: Pull backend image
+      # ---- 1. Checkout code ----
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---- 2. Login to Docker Hub ----
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      # ---- 3. Build & push backend image ----
+      - name: Build backend image
+        run: |
+          docker build \
+            -t ${{ env.BACKEND_IMAGE }}:latest \
+            -t ${{ env.BACKEND_IMAGE }}:${{ github.sha }} \
+            -f backend/Dockerfile \
+            backend/
+
+      - name: Push backend image
+        run: |
+          docker push ${{ env.BACKEND_IMAGE }}:latest
+          docker push ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+      # ---- 4. Build & push frontend image ----
+      - name: Build frontend image
+        run: |
+          docker build \
+            --build-arg VITE_API_URL=/api \
+            --build-arg VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }} \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }} \
+            --build-arg VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }} \
+            --build-arg VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }} \
+            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }} \
+            --build-arg VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }} \
+            --build-arg VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }} \
+            -t ${{ env.FRONTEND_IMAGE }}:latest \
+            -t ${{ env.FRONTEND_IMAGE }}:${{ github.sha }} \
+            -f eta-web/Dockerfile \
+            eta-web/
+
+      - name: Push frontend image
+        run: |
+          docker push ${{ env.FRONTEND_IMAGE }}:latest
+          docker push ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+      # ---- 5. Deploy via Docker Compose ----
+      - name: Deploy containers
         run: |
           cd ~/deploy
-          docker compose pull
-          docker compose up -d --remove-orphans
+          docker compose -f docker-compose.app.yml pull
+          docker compose -f docker-compose.app.yml up -d --remove-orphans
+          echo "✅ Containers deployed"
+
+      # ---- 6. Health checks ----
+      - name: Wait for services to start
+        run: sleep 15
+
+      - name: Health check — Backend
+        run: |
+          curl --fail --silent --max-time 10 http://localhost:5000/health || \
+          (echo "❌ Backend health check failed" && docker logs eta-backend --tail 30 && exit 1)
+          echo "✅ Backend is healthy"
+
+      - name: Health check — Frontend
+        run: |
+          curl --fail --silent --max-time 10 http://localhost:80/ || \
+          (echo "❌ Frontend health check failed" && docker logs eta-frontend --tail 30 && exit 1)
+          echo "✅ Frontend is healthy"
+
+      # ---- 7. Cleanup old images (protect 60 GB disk) ----
+      - name: Cleanup unused Docker resources
+        if: always()
+        run: |
+          docker image prune -af --filter "until=24h"
+          docker builder prune -af --filter "until=24h"
+          docker system df
+          echo "✅ Disk cleanup complete"
+
+      # ---- 8. Logout ----
+      - name: Logout from Docker Hub
+        if: always()
+        run: docker logout
