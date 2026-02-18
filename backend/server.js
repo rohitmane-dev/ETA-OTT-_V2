@@ -32,11 +32,23 @@ import { initializeWebSocket } from './services/websocket.service.js';
 
 const app = express();
 const httpServer = createServer(app);
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',')
+    || ['http://localhost:5173', 'http://localhost:3000', 'http://100.31.154.64'];
+
 const io = new Server(httpServer, {
     cors: {
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+        origin: allowedOrigins,
         credentials: true
     }
+});
+
+// ---- Health check (before any middleware so it always responds) ----
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'OK',
+        timestamp: new Date().toISOString(),
+        service: 'Eta Backend'
+    });
 });
 
 // Middleware
@@ -48,7 +60,7 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+    origin: allowedOrigins,
     credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -67,14 +79,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 
-// Health check
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        service: 'Eta Backend'
-    });
-});
+// (Health check is registered above, before middleware)
 
 // API Routes
 app.use('/api/auth', authRoutes);
