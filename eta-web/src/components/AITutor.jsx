@@ -84,6 +84,8 @@ const formatMessage = (content) => {
     let inCodeBlock = false;
     let codeLanguage = '';
     let codeLines = [];
+    let inTable = false;
+    let tableLines = [];
     const elements = [];
 
     lines.forEach((line, lineIndex) => {
@@ -146,6 +148,65 @@ const formatMessage = (content) => {
         if (inCodeBlock) {
             codeLines.push(line);
             return;
+        }
+
+        // Handle markdown tables
+        if (trimmedLine.includes('|') && !inTable) {
+            inTable = true;
+            tableLines = [line];
+            return;
+        }
+
+        if (inTable) {
+            if (trimmedLine.includes('|')) {
+                tableLines.push(line);
+                return;
+            } else {
+                // End of table
+                inTable = false;
+
+                // Parse and render table
+                const rows = tableLines.map(l =>
+                    l.split('|').map(cell => cell.trim()).filter(cell => cell)
+                );
+
+                // Skip separator row (contains dashes)
+                const dataRows = rows.filter(row => !row[0].includes('-'));
+
+                if (dataRows.length > 0) {
+                    const headers = dataRows[0];
+                    const bodyRows = dataRows.slice(1);
+
+                    elements.push(
+                        <div key={`table-${lineIndex}`} className="my-6 overflow-x-auto">
+                            <table className="min-w-full border-collapse bg-card/50 rounded-lg overflow-hidden shadow-lg">
+                                <thead>
+                                    <tr className="bg-primary/10 border-b-2 border-primary/30">
+                                        {headers.map((header, i) => (
+                                            <th key={i} className="px-4 py-3 text-left text-sm font-bold text-primary border-r border-border/30 last:border-r-0">
+                                                {parseInlineStyles(header)}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {bodyRows.map((row, rowIndex) => (
+                                        <tr key={rowIndex} className={`border-b border-border/20 ${rowIndex % 2 === 0 ? 'bg-card/30' : 'bg-card/50'} hover:bg-primary/5 transition-colors`}>
+                                            {row.map((cell, cellIndex) => (
+                                                <td key={cellIndex} className="px-4 py-3 text-sm text-muted-foreground border-r border-border/20 last:border-r-0">
+                                                    {parseInlineStyles(cell)}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+                tableLines = [];
+            }
         }
 
         // Handle ### Headers (Premium Blue Styling)
@@ -251,7 +312,39 @@ const parseInlineStyles = (text) => {
     });
 };
 
-const StageItem = memo(({ type, content, video, isFinal }) => {
+const StageItem = memo(({ type, content, video, isFinal, isActive, onComplete }) => {
+    const [displayedContent, setDisplayedContent] = useState('');
+    const [isDone, setIsDone] = useState(false);
+
+    useEffect(() => {
+        if (!content) return;
+
+        // If we've already done typing for this specific content, don't repeat
+        if (displayedContent === content && isDone) return;
+
+        // Reset for new content
+        setDisplayedContent('');
+        setIsDone(false);
+
+        let currentIdx = 0;
+        const words = content.split(' ');
+
+        // Ultra-fast reveal: reveal 3 words at a time every 25ms
+        // This makes it feel incredibly snappy and "instant"
+        const interval = setInterval(() => {
+            if (currentIdx < words.length) {
+                currentIdx += 3;
+                setDisplayedContent(words.slice(0, currentIdx).join(' '));
+            } else {
+                clearInterval(interval);
+                setIsDone(true);
+                if (onComplete) onComplete();
+            }
+        }, 25);
+
+        return () => clearInterval(interval);
+    }, [content]); // Only re-run when content changes
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 5 }}
@@ -259,11 +352,16 @@ const StageItem = memo(({ type, content, video, isFinal }) => {
             className="mb-6 last:mb-0 w-full overflow-hidden"
         >
             <div className="w-full overflow-hidden">
-                {formatMessage(content)}
+                {formatMessage(displayedContent)}
+                {!isDone && <span className="inline-block w-1.5 h-4 bg-primary/40 ml-1 animate-pulse" />}
             </div>
 
-            {isFinal && video && (
-                <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full">
+            {isFinal && isDone && video && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="mt-6 overflow-hidden rounded-2xl border border-border bg-card shadow-xl w-full max-w-full"
+                >
                     <div className="p-3 bg-blue-500/5 border-b flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <div className="p-1 bg-blue-500 rounded-lg shrink-0">
@@ -290,13 +388,15 @@ const StageItem = memo(({ type, content, video, isFinal }) => {
                             controls={true}
                         />
                     </div>
-                </div>
+                </motion.div>
             )}
         </motion.div>
     );
 });
 
 const SequentialFlow = ({ content, onComplete, scrollRef, speak, messageId, suggestedVideo, shouldSpeak }) => {
+    const [activeStage, setActiveStage] = useState(0);
+
     const stages = useMemo(() => {
         const parts = [];
         const markers = ['[[INTRO]]', '[[CONCEPT]]', '[[CODE]]', '[[SUMMARY]]'];
@@ -343,52 +443,61 @@ const SequentialFlow = ({ content, onComplete, scrollRef, speak, messageId, sugg
             parts.push({ type: 'CONCEPT', content: cleanContent, video: videoUrl });
         }
 
-        // Consolidate videos: prioritize embedded video, fallback to suggestedVideo
         const videoInAnyStage = parts.find(p => p.video);
         if (videoInAnyStage && parts.length > 0) {
-            // If AI embedded a video in text, use that
             parts.forEach(p => p.video = null);
             parts[parts.length - 1].video = videoInAnyStage.video;
         } else if (suggestedVideo && parts.length > 0) {
-            // Otherwise use backend's suggested video
             parts[parts.length - 1].video = suggestedVideo.url;
         }
 
         return parts;
     }, [content, suggestedVideo]);
 
-    // Fast sequential rendering without char-by-char typing
     useEffect(() => {
-        // Speak full content immediately only during initial typing phase
         if (shouldSpeak) {
             speak(content, messageId);
         }
 
-        // Signal completion immediately
-        if (onComplete) onComplete();
+        // Start first stage
+        setActiveStage(0);
+    }, [content, messageId, shouldSpeak]);
 
-        // Scroll to bottom
-        if (scrollRef.current) {
+    const handleStageComplete = () => {
+        if (activeStage < stages.length - 1) {
+            setActiveStage(prev => prev + 1);
+        } else {
+            if (onComplete) onComplete();
+        }
+    };
+
+    // Auto-scroll as text flows
+    useEffect(() => {
+        if (scrollRef.current && (shouldSpeak || activeStage > 0)) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [content, messageId, shouldSpeak]);
+    }, [activeStage, shouldSpeak]);
 
     return (
         <div className="space-y-4">
             {stages.map((s, i) => (
-                <StageItem
-                    key={i}
-                    type={s.type}
-                    content={s.content}
-                    video={s.video}
-                    isFinal={i === stages.length - 1}
-                />
+                i <= activeStage && (
+                    <StageItem
+                        key={i}
+                        type={s.type}
+                        content={s.content}
+                        video={s.video}
+                        isFinal={i === stages.length - 1}
+                        isActive={shouldSpeak && i === activeStage}
+                        onComplete={handleStageComplete}
+                    />
+                )
             ))}
         </div>
     );
 };
 
-export default function AITutor({ courseId, contentId, contentTitle, selectedText, visualContext, isParentActive = true }) {
+export default function AITutor({ courseId, contentId, contentTitle, selectedText, visualContext, isParentActive = true, onQuerySubmit }) {
     const { user } = useAuth();
     const userName = user?.profile?.name || 'Student';
     const [messages, setMessages] = useState([]);
@@ -411,6 +520,34 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
     useEffect(() => {
         localStorage.setItem('ai_tutor_lang', targetLanguage);
     }, [targetLanguage]);
+
+    const welcomeAddedRef = useRef(false);
+
+    // Welcome message - show once per content
+    useEffect(() => {
+        if (contentId && messages.length === 0 && !welcomeAddedRef.current) {
+            const welcomeKey = `ai_welcome_${contentId}`;
+            const hasShownWelcome = sessionStorage.getItem(welcomeKey);
+
+            if (!hasShownWelcome) {
+                welcomeAddedRef.current = true;
+                const welcomeMessage = targetLanguage === 'hindi'
+                    ? `Namaste ${userName}! \n\nMain aapka AI Tutor hoon. Aap abhi **${contentTitle || 'is resource'}** dekh rahe hain.\n\n### Kaise Use Karein, \n\n1. **Pencil Tool** 📝 - Screen par kisi bhi area ko select karne ke liye pencil icon par click karein. \n2. **Area Select Karein** - Jis part ke baare mein jaanna hai, usko highlight karein. \n3. **Sawaal Poochein** - Apna doubt type karein ya voice use karein. \n\nMain aapko detailed explanation dunga with relevant examples aur videos!\n\nKoi bhi sawaal poochne ke liye ready hoon. Chaliye shuru karte hain! 🚀`
+                    : `Hello ${userName}! \n\nI'm your AI Tutor. You're currently viewing **${contentTitle || 'this resource'}**.\n\n### How to Use:\n\n1. **Pencil Tool** 📝 - Click the pencil icon to activate selection mode\n2. **Select Area** - Highlight any part of the content you want to learn about\n3. **Ask Question** - Type your question or use voice input\n\nI'll provide detailed explanations with relevant examples and video tutorials!\n\nReady to help with any questions. Let's get started! 🚀`;
+
+                const welcomeId = 'welcome-' + Date.now();
+
+                setMessages([{
+                    role: 'assistant',
+                    content: welcomeMessage,
+                    id: welcomeId,
+                    isWelcome: true
+                }]);
+
+                sessionStorage.setItem(welcomeKey, 'true');
+            }
+        }
+    }, [contentId, contentTitle, userName, targetLanguage]);
 
     useEffect(() => {
         // Initialize Speech Recognition
@@ -572,6 +709,11 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                 pendingVideo: doubt.suggestedVideo
             }]);
 
+            // Call callback to clear selection after successful query
+            if (onQuerySubmit) {
+                onQuerySubmit();
+            }
+
         } catch (error) {
             console.error('AI Tutor error:', error);
 
@@ -687,6 +829,19 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
         setMessages(prev => prev.map(m => ({ ...m, isTyping: false })));
     };
 
+    // Auto-speak welcome message (placed after speak function is defined)
+    useEffect(() => {
+        const welcomeMsg = messages.find(m => m.isWelcome);
+        if (welcomeMsg && !hasSpokenWelcome.current) {
+            // Small delay to ensure message is rendered and voices are loaded
+            const timer = setTimeout(() => {
+                speak(welcomeMsg.content, welcomeMsg.id);
+                hasSpokenWelcome.current = true;
+            }, 800);
+            return () => clearTimeout(timer);
+        }
+    }, [messages, speak]);
+
     const handleEscalate = async (doubtId, msgId) => {
         try {
             await apiClient.post(`/doubts/${doubtId}/escalate`);
@@ -705,8 +860,10 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
             {/* Header */}
             <div className="p-4 border-b bg-primary/5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                        <Bot className="w-5 h-5 text-white" />
+                    <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center p-[1.5px] bg-gradient-to-tr from-primary via-emerald-400 to-blue-400 shadow-lg shadow-primary/20">
+                        <div className="w-full h-full rounded-full bg-primary flex items-center justify-center">
+                            <Bot className="w-4 h-4 text-white" />
+                        </div>
                     </div>
                     <div>
                         <h3 className="font-bold text-sm">Eta AI Tutor</h3>
@@ -782,9 +939,21 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
                         className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                         <div className={`flex gap-3 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                            <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ${msg.role === 'user' ? 'bg-secondary' : 'bg-primary/10'
+                            <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center p-[1.5px] ${msg.role === 'user'
+                                ? 'bg-gradient-to-tr from-blue-500 via-indigo-500 to-purple-600 shadow-md shadow-indigo-500/20'
+                                : 'bg-gradient-to-tr from-primary via-emerald-400 to-blue-400 shadow-md shadow-primary/20'
                                 }`}>
-                                {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-primary" />}
+                                <div className="w-full h-full rounded-full bg-card flex items-center justify-center overflow-hidden">
+                                    {msg.role === 'user' ? (
+                                        user?.profile?.avatar ? (
+                                            <img src={user.profile.avatar} alt="You" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <User className="w-4 h-4 text-muted-foreground" />
+                                        )
+                                    ) : (
+                                        <Bot className="w-4 h-4 text-primary" />
+                                    )}
+                                </div>
                             </div>
 
                             <div className="space-y-2 max-w-full overflow-hidden">
@@ -915,23 +1084,36 @@ export default function AITutor({ courseId, contentId, contentTitle, selectedTex
 
             {/* Input Area */}
             <div className="p-4 bg-card border-t border-border">
-                {visualContext && (
+                {(visualContext || selectedText) && (
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mb-3 px-3 py-1.5 bg-primary/5 border border-primary/20 rounded-lg flex items-center justify-between"
+                        className="mb-3 p-3 bg-primary/5 border border-primary/20 rounded-xl space-y-2 backdrop-blur-sm shadow-inner"
                     >
-                        <div className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest">
-                            <Maximize2 className="w-3 h-3" />
-                            Visual Focus Active
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-[10px] font-black text-primary uppercase tracking-[0.2em]">
+                                <Sparkles className="w-3 h-3" />
+                                {visualContext ? 'Visual Context Ready' : 'Selection Captured'}
+                            </div>
+                            {!input && (
+                                <button
+                                    onClick={() => handleSend(null, 'Analyze this part from the resource')}
+                                    className="text-[10px] bg-primary text-white px-3 py-1 rounded-full font-black uppercase tracking-wider hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/20"
+                                >
+                                    Explain Now
+                                </button>
+                            )}
                         </div>
-                        {!input && (
-                            <button
-                                onClick={() => handleSend(null, 'Explain this area')}
-                                className="text-[10px] bg-primary text-white px-3 py-1 rounded-full font-bold hover:scale-105 transition-all shadow-sm"
-                            >
-                                Explain it
-                            </button>
+                        {selectedText && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed italic bg-black/5 dark:bg-white/5 p-2 rounded-lg border border-border/10">
+                                "{selectedText}"
+                            </p>
+                        )}
+                        {visualContext && !selectedText && (
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60 italic">
+                                <Maximize2 className="w-3 h-3" />
+                                Area mapped for visual analysis...
+                            </div>
                         )}
                     </motion.div>
                 )}

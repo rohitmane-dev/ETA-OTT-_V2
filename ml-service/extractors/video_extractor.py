@@ -1,4 +1,4 @@
-import whisper
+# whisper is lazy-loaded
 import os
 import requests
 import cloudinary
@@ -19,8 +19,6 @@ cloudinary.config(
     secure=True
 )
 
-# Load model from shared loader
-from model_loader import model
 
 def setup_ffmpeg():
     """Ensure FFmpeg is available in the environment."""
@@ -119,7 +117,9 @@ def extract_video(file_url):
         
         # 2. Transcribe with Whisper
         print(f"🎙️ Transcribing {job_id}...")
-        result = model.transcribe(temp_video, fp16=False)
+        from model_loader import get_whisper_model
+        whisper_model = get_whisper_model()
+        result = whisper_model.transcribe(temp_video, fp16=False)
 
         # 3. Generate thumbnail from video
         thumbnail_url = None

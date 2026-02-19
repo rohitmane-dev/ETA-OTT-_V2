@@ -100,11 +100,11 @@ export default function CourseResources() {
     }
 
     return (
-        <div className="min-h-screen bg-background text-foreground flex flex-col">
+        <div className="h-screen bg-background text-foreground flex flex-col overflow-hidden relative">
             {/* Header */}
             <div className="bg-card border-b border-border sticky top-0 z-30">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                <div className="max-w-7xl mx-auto px-6 py-4 header-responsive">
+                    <div className="header-title-group">
                         <button
                             onClick={() => navigate(-1)}
                             className="p-2 hover:bg-secondary rounded-xl transition-colors"
@@ -118,11 +118,11 @@ export default function CourseResources() {
                             </p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="header-actions-group">
                         <ThemeToggle />
-                        <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-secondary/50 rounded-xl text-sm font-medium hover:bg-secondary transition-colors">
-                            <Star className="w-4 h-4 text-yellow-500" />
-                            Rate Course
+                        <button className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 bg-secondary/30 hover:bg-secondary/50 rounded-xl transition-all shadow-sm">
+                            <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Rate Course</span>
                         </button>
                     </div>
                 </div>
@@ -130,7 +130,7 @@ export default function CourseResources() {
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                <main className="flex-1 overflow-y-auto p-6 space-y-8">
                     {/* Course Summary Card */}
                     <div className="bg-gradient-to-br from-primary/5 to-blue-600/5 rounded-3xl p-8 border border-primary/10">
                         <div className="flex flex-col md:flex-row gap-8 items-start">
@@ -256,7 +256,7 @@ export default function CourseResources() {
                                                     </span>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                                            <div className="flex items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
                                                 <a
                                                     href={content.file.url}
                                                     download={content.title}
@@ -279,9 +279,9 @@ export default function CourseResources() {
                                                 </button>
                                                 <button
                                                     onClick={() => setSelectedContent(content)}
-                                                    className="flex-1 sm:flex-none py-2 px-4 rounded-xl bg-secondary hover:bg-primary hover:text-white transition-all text-xs font-bold flex items-center justify-center gap-2"
+                                                    className="flex-1 sm:flex-none py-2 px-6 rounded-xl bg-secondary hover:bg-primary hover:text-white transition-all text-sm font-bold flex items-center justify-center gap-2"
                                                 >
-                                                    Start Learning
+                                                    <span className="btn-text">Start Learning</span>
                                                     <Play className="w-3 h-3 fill-current" />
                                                 </button>
                                             </div>
@@ -291,7 +291,7 @@ export default function CourseResources() {
                             )}
                         </div>
                     </div>
-                </div>
+                </main>
 
                 {/* Performance / Discussion Column */}
                 <div className="hidden xl:block w-80 border-l border-border p-6 space-y-8 bg-secondary/10 overflow-y-auto">
@@ -332,7 +332,6 @@ export default function CourseResources() {
             </div>
 
             {/* Content Viewer Modal */}
-            {/* Modal Layer */}
             <AnimatePresence mode="wait">
                 {selectedContent && (
                     <motion.div

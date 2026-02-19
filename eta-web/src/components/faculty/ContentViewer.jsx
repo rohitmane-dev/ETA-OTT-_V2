@@ -40,10 +40,12 @@ export default function ContentViewer({ isOpen, onClose, content }) {
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
     const viewerRef = useRef(null);
     const playerRef = useRef(null);
+    const selectionBoxRef = useRef(null);
     const [localContent, setLocalContent] = useState(content);
     const [estimatedTime, setEstimatedTime] = useState(0);
     const [aiSidebarWidth, setAISidebarWidth] = useState(400); // Default width
     const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+    const [isTabsVisible, setIsTabsVisible] = useState(true);
     const socket = useSocket();
 
     // Sync local content with prop
@@ -244,11 +246,20 @@ export default function ContentViewer({ isOpen, onClose, content }) {
 
     const handleMouseDown = (e) => {
         if (!isSelectionMode || !viewerRef.current) return;
+
+        // Prevent default touch behavior (scrolling) when drawing
+        if (e.type === 'touchstart' && isSelectionMode) {
+            e.preventDefault();
+        }
+
         e.stopPropagation();
 
+        const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+
         const rect = viewerRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left + viewerRef.current.scrollLeft;
-        const y = e.clientY - rect.top + viewerRef.current.scrollTop;
+        const x = clientX - rect.left + viewerRef.current.scrollLeft;
+        const y = clientY - rect.top + viewerRef.current.scrollTop;
 
         const handleSize = 10;
         if (selectionBox) {
@@ -271,45 +282,71 @@ export default function ContentViewer({ isOpen, onClose, content }) {
 
         setIsDrawing(true);
         setStartPos({ x, y });
+        selectionBoxRef.current = null;
     };
 
     const handleMouseMove = (e) => {
         if (!isSelectionMode || (!isDrawing && !isMoving && !isResizing) || !viewerRef.current) return;
 
-        const rect = viewerRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left + viewerRef.current.scrollLeft;
-        const y = e.clientY - rect.top + viewerRef.current.scrollTop;
+        if (e.type === 'touchmove' && isSelectionMode) {
+            e.preventDefault();
+        }
 
+        const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+
+        const rect = viewerRef.current.getBoundingClientRect();
+        const x = clientX - rect.left + viewerRef.current.scrollLeft;
+        const y = clientY - rect.top + viewerRef.current.scrollTop;
+
+        let newBox = null;
         if (isDrawing) {
-            setSelectionBox({
+            newBox = {
                 x: Math.min(x, startPos.x),
                 y: Math.min(y, startPos.y),
                 width: Math.abs(x - startPos.x),
                 height: Math.abs(y - startPos.y),
                 type: 'rect'
-            });
+            };
         } else if (isMoving) {
-            setSelectionBox(prev => ({
-                ...prev,
+            newBox = {
+                ...selectionBox,
                 x: x - startPos.x,
                 y: y - startPos.y
-            }));
+            };
         } else if (isResizing === 'se') {
-            setSelectionBox(prev => ({
-                ...prev,
-                width: Math.max(20, x - prev.x),
-                height: Math.max(20, y - prev.y)
-            }));
+            newBox = {
+                ...selectionBox,
+                width: Math.max(20, x - selectionBox.x),
+                height: Math.max(20, y - selectionBox.y)
+            };
+        }
+
+        if (newBox) {
+            setSelectionBox(newBox);
+            selectionBoxRef.current = newBox;
         }
     };
 
     const extractTextFromArea = (box) => {
         if (!box || (content.type !== 'pdf' && content.type !== 'web') || !viewerRef.current) return '';
-        const textElements = document.querySelectorAll('.react-pdf__Page__textContent span');
+
+        // Target all text layer elements (react-pdf uses both span and div)
+        const textElements = document.querySelectorAll('.react-pdf__Page__textContent span, .react-pdf__Page__textContent div, .textLayer span, .textLayer div, [role="presentation"] span, .pdf-text span');
         let extractedText = [];
         const vRect = viewerRef.current.getBoundingClientRect();
 
+        // Add small padding to the box for better hit detection
+        const padding = 2;
+        const boxX = box.x - padding;
+        const boxY = box.y - padding;
+        const boxW = box.width + (padding * 2);
+        const boxH = box.height + (padding * 2);
+
         textElements.forEach(el => {
+            // Only process elements that actually have text
+            if (!el.innerText?.trim()) return;
+
             const eRect = el.getBoundingClientRect();
             const relRect = {
                 left: eRect.left - vRect.left + viewerRef.current.scrollLeft,
@@ -318,19 +355,24 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                 bottom: eRect.bottom - vRect.top + viewerRef.current.scrollTop
             };
 
-            if (relRect.left < box.x + box.width && relRect.right > box.x &&
-                relRect.top < box.y + box.height && relRect.bottom > box.y) {
+            // Check if element intersects with selection box
+            if (relRect.left < boxX + boxW && relRect.right > boxX &&
+                relRect.top < boxY + boxH && relRect.bottom > boxY) {
                 extractedText.push(el.innerText);
             }
         });
-        return extractedText.join(' ').replace(/\s+/g, ' ').trim();
+
+        const result = extractedText.join(' ').replace(/\s+/g, ' ').trim();
+        return result;
     };
 
     const handleMouseUp = () => {
+        const currentBox = selectionBoxRef.current || selectionBox;
+
         if (isDrawing || isMoving || isResizing) {
-            if (selectionBox?.width > 10 && selectionBox?.height > 10) {
+            if (currentBox?.width > 10 && currentBox?.height > 10) {
                 if (content.type === 'pdf' || content.type === 'web') {
-                    const txt = extractTextFromArea(selectionBox);
+                    const txt = extractTextFromArea(currentBox);
                     setSelection(txt || '(Visual Scan - AI Analysis)');
                 } else if (content.type === 'image') {
                     setSelection('(Image Focus - AI Vision)');
@@ -339,6 +381,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                     const formattedTime = currentTime ? ` [at ${Math.floor(currentTime / 60)}:${Math.floor(currentTime % 60).toString().padStart(2, '0')}]` : '';
                     setSelection(`(Video Focus - Analyzing Frame${formattedTime})`);
                 }
+
                 if (!isAISidebarOpen) setIsAISidebarOpen(true);
             }
         }
@@ -759,20 +802,22 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                 className={`bg-card w-full h-full max-w-7xl overflow-hidden flex flex-col ${isFullScreen ? '' : 'rounded-2xl shadow-2xl border border-border/50'} ${isSelectionMode ? 'cursor-crosshair' : ''}`}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b bg-card">
-                    <div className="flex items-center gap-4 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 gap-4 border-b bg-card">
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
                         <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                             {content.type === 'video' ? <Video className="w-5 h-5 text-primary" /> : <FileText className="w-5 h-5 text-primary" />}
                         </div>
-                        <div className="min-w-0">
-                            <h2 className="text-lg font-bold truncate">{localContent?.title || 'Loading Content...'}</h2>
-                            <div className="flex items-center gap-2 mt-0.5">
-                                <p className="text-xs text-muted-foreground capitalize">
-                                    {localContent?.metadata?.category || localContent?.type || 'General'} • {localContent?.metadata?.difficulty || 'Standard'}
+                        <div className="min-w-0 flex-1">
+                            <h2 className="text-lg font-bold truncate pr-4">{localContent?.title || 'Loading Content...'}</h2>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                                <p className="text-xs text-muted-foreground capitalize flex items-center gap-2">
+                                    <span>{localContent?.metadata?.category || localContent?.type || 'General'}</span>
+                                    <span className="text-muted-foreground/30">•</span>
+                                    <span>{localContent?.metadata?.difficulty || 'Standard'}</span>
                                 </p>
                                 {localContent.processingStatus && (
-                                    <>
-                                        <span className="text-muted-foreground/30 text-[10px]">•</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-muted-foreground/30 text-[10px] hidden sm:inline">•</span>
                                         <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${localContent.processingStatus === 'completed'
                                             ? 'bg-green-500/10 text-green-500 border-green-500/20'
                                             : localContent.processingStatus === 'failed'
@@ -789,19 +834,22 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                                                 localContent.processingStatus === 'failed' ? 'AI Failed' : 'AI Processing'}
                                         </div>
                                         {(localContent.processingStatus === 'processing' || localContent.processingStatus === 'pending') && (
-                                            <span className="text-[10px] font-bold text-primary animate-pulse flex items-center gap-1">
+                                            <span className="text-[10px] font-bold text-primary animate-pulse flex items-center gap-1 whitespace-nowrap">
                                                 <Clock className="w-3 h-3" />
                                                 {estimatedTime > 0 ? `~${estimatedTime}s` : 'Ready Soon'}
                                             </span>
                                         )}
-                                    </>
+                                    </div>
                                 )}
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-auto sm:ml-0">
                         <button
-                            onClick={() => setIsSelectionMode(!isSelectionMode)}
+                            onClick={() => {
+                                setIsSelectionMode(!isSelectionMode);
+                                if (!isAISidebarOpen) setIsAISidebarOpen(true);
+                            }}
                             className={`p-2 rounded-lg transition-all ${isSelectionMode ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`}
                             title="Selection Tool - Highlight area for AI context"
                         >
@@ -812,10 +860,10 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                                 href={content.extractedData.metadata.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg text-xs font-bold flex items-center gap-2 transition-all mr-2"
+                                className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
                             >
                                 <ExternalLink className="w-4 h-4" />
-                                Original Website
+                                <span className="hidden lg:inline">Original Website</span>
                             </a>
                         )}
                         {content.type === 'web' && (
@@ -825,28 +873,17 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                                         href={content.file.url}
                                         download={`${content.title}_Summary.pdf`}
                                         className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                                        title="Download the AI-Simplified PDF Summary"
+                                        title="Download PDF Summary"
                                     >
                                         <Download className="w-4 h-4" />
-                                        PDF Summary
-                                    </a>
-                                )}
-                                {content.extractedData?.metadata?.docxUrl && (
-                                    <a
-                                        href={content.extractedData.metadata.docxUrl}
-                                        download={`${content.title}_Summary.docx`}
-                                        className="px-3 py-1.5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                                        title="Download the Word Summary"
-                                    >
-                                        <FileText className="w-4 h-4" />
-                                        Word Doc
+                                        <span className="hidden lg:inline">PDF Summary</span>
                                     </a>
                                 )}
                             </div>
                         )}
-                        <div className="w-px h-6 bg-border mx-2" />
+                        <div className="hidden sm:block w-px h-6 bg-border mx-1" />
                         <ThemeToggle />
-                        <div className="w-px h-6 bg-border mx-2" />
+                        <div className="hidden sm:block w-px h-6 bg-border mx-1" />
                         <button
                             onClick={toggleFullScreen}
                             className="p-2 hover:bg-secondary rounded-lg transition-colors"
@@ -866,7 +903,7 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                         )}
                         <button
                             onClick={onClose}
-                            className="p-2 hover:bg-red-500/10 text-red-500 rounded-lg transition-colors ml-2"
+                            className="p-2 hover:bg-red-500/10 text-red-500 rounded-lg transition-colors ml-1"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -888,6 +925,9 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                                     onMouseDown={handleMouseDown}
                                     onMouseMove={handleMouseMove}
                                     onMouseUp={handleMouseUp}
+                                    onTouchStart={handleMouseDown}
+                                    onTouchMove={handleMouseMove}
+                                    onTouchEnd={handleMouseUp}
                                 >
                                     {renderViewer()}
                                     {isSelectionMode && selectionBox && (
@@ -1000,6 +1040,11 @@ export default function ContentViewer({ isOpen, onClose, content }) {
                                     selectedText={selection}
                                     visualContext={selectionBox}
                                     isParentActive={activeTab === 'viewer'}
+                                    onQuerySubmit={() => {
+                                        // Clear selection after query is submitted
+                                        setSelection('');
+                                        setSelectionBox(null);
+                                    }}
                                 />
                             </motion.div>
                         )}
@@ -1007,12 +1052,36 @@ export default function ContentViewer({ isOpen, onClose, content }) {
 
                     {/* Sidebar Tabs */}
                     {!isFullScreen && (
-                        <div className="w-16 border-l bg-card flex flex-col items-center py-6 gap-6 z-40">
-                            <button onClick={() => setActiveTab('viewer')} className={`p-3 rounded-xl transition-all ${activeTab === 'viewer' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Content Viewer"><Eye className="w-6 h-6" /></button>
-                            <button onClick={() => setActiveTab('details')} className={`p-3 rounded-xl transition-all ${activeTab === 'details' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Extracted Data & Details"><Info className="w-6 h-6" /></button>
-                            <button onClick={() => setActiveTab('graph')} className={`p-3 rounded-xl transition-all ${activeTab === 'graph' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Knowledge Graph"><BarChart3 className="w-6 h-6" /></button>
-                            <button onClick={() => setIsAISidebarOpen(!isAISidebarOpen)} className={`p-3 rounded-xl transition-all ${isAISidebarOpen ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="AI Tutor & Doubts"><MessageCircle className="w-6 h-6" /></button>
-                        </div>
+                        <AnimatePresence>
+                            {isTabsVisible ? (
+                                <motion.div
+                                    initial={{ width: 0, opacity: 0 }}
+                                    animate={{ width: 64, opacity: 1 }}
+                                    exit={{ width: 0, opacity: 0 }}
+                                    className="border-l bg-card flex flex-col items-center py-6 gap-6 z-40 relative h-full"
+                                >
+                                    {/* Mobile close button */}
+                                    <button
+                                        onClick={() => setIsTabsVisible(false)}
+                                        className="md:hidden absolute -left-8 top-1/2 -translate-y-1/2 w-8 h-12 bg-card border border-r-0 flex items-center justify-center rounded-l-xl text-muted-foreground shadow-[-4px_0_10px_rgba(0,0,0,0.1)]"
+                                    >
+                                        <ChevronRight className="w-5 h-5" />
+                                    </button>
+
+                                    <button onClick={() => setActiveTab('viewer')} className={`p-3 rounded-xl transition-all ${activeTab === 'viewer' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Content Viewer"><Eye className="w-6 h-6" /></button>
+                                    <button onClick={() => setActiveTab('details')} className={`p-3 rounded-xl transition-all ${activeTab === 'details' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Extracted Data & Details"><Info className="w-6 h-6" /></button>
+                                    <button onClick={() => setActiveTab('graph')} className={`p-3 rounded-xl transition-all ${activeTab === 'graph' ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="Knowledge Graph"><BarChart3 className="w-6 h-6" /></button>
+                                    <button onClick={() => setIsAISidebarOpen(!isAISidebarOpen)} className={`p-3 rounded-xl transition-all ${isAISidebarOpen ? 'bg-primary text-white shadow-lg' : 'hover:bg-secondary text-muted-foreground'}`} title="AI Tutor & Doubts"><MessageCircle className="w-6 h-6" /></button>
+                                </motion.div>
+                            ) : (
+                                <button
+                                    onClick={() => setIsTabsVisible(true)}
+                                    className="md:hidden fixed right-0 top-1/2 -translate-y-1/2 w-8 h-16 bg-primary text-white flex items-center justify-center rounded-l-2xl z-50 shadow-2xl animate-pulse"
+                                >
+                                    <ChevronLeft className="w-6 h-6" />
+                                </button>
+                            )}
+                        </AnimatePresence>
                     )}
                 </div>
 

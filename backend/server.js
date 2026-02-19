@@ -34,22 +34,87 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+        origin: (origin, callback) => {
+            const defaultOrigins = [
+                'http://localhost:5173',
+                'http://localhost:5174',
+                'http://localhost:3000',
+                'http://127.0.0.1:5173',
+                'https://eta-ott.netlify.app'
+            ];
+            const envOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : [];
+            const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
+
+            if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(a => a === '*' || (origin.endsWith('.netlify.app') && a.includes('.netlify.app')))) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
         credentials: true
     }
 });
 
 // Middleware
 app.use(helmet({
-    crossOriginOpenerPolicy: { policy: "unsafe-none" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: false
 }));
 app.use(morgan('dev'));
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
-    credentials: true
+    origin: (origin, callback) => {
+        // Define default allowed origins
+        const defaultOrigins = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:3000',
+            'http://127.0.0.1:5173',
+            'https://eta-ott.netlify.app'
+        ];
+
+        const envOrigins = process.env.ALLOWED_ORIGINS
+            ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+            : [];
+
+        const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
+
+        // Allow if no origin (like mobile apps or curl)
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        // Check if origin is allowed
+        const isAllowed = allowedOrigins.some(allowed => {
+            if (allowed === '*') return true;
+            if (allowed === origin) return true;
+
+            // Allow local network IP addresses (e.g. 192.168.x.x) in development
+            if (process.env.NODE_ENV === 'development') {
+                const isPrivateIP = origin.match(/^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)\d+\.\d+(:\d+)?$/);
+                if (isPrivateIP) return true;
+            }
+
+            // Support netlify subdomains (e.g. preview deploys)
+            if (origin.endsWith('.netlify.app') && (allowed.includes('.netlify.app') || allowed === 'https://*.netlify.app')) {
+                return true;
+            }
+            return false;
+        });
+
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            console.warn(`🛑 CORS blocked for origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));

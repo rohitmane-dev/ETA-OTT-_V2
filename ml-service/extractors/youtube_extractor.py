@@ -1,6 +1,6 @@
 import yt_dlp
 import os
-import whisper
+# whisper is lazy-loaded
 import json
 import uuid
 import shutil
@@ -44,6 +44,22 @@ def extract_youtube(video_url):
     # Ensure FFmpeg is available
     setup_ffmpeg()
     
+    # 1. Handle Cookies (Securely)
+    # Priority: Env Var (Secret) > Local File
+    cookies_path = None
+    temp_cookie_file = os.path.join(job_dir, "cookies.txt")
+    
+    env_cookies = os.getenv('YOUTUBE_COOKIES_CONTENT')
+    local_cookie_file = os.path.abspath("youtube_cookies.txt")
+    
+    if env_cookies:
+        # If cookies are in env, write them to a temp file for this job
+        with open(temp_cookie_file, "w") as f:
+            f.write(env_cookies)
+        cookies_path = temp_cookie_file
+    elif os.path.exists(local_cookie_file):
+        cookies_path = local_cookie_file
+
     # yt-dlp options - output to specific job directory
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -56,6 +72,22 @@ def extract_youtube(video_url):
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
+        'cookiefile': cookies_path,
+        # Updated to bypass aggressive bot detection
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'mweb'],
+                'player_skip': ['webpage', 'configs'],
+                'skip': ['dash', 'hls']
+            }
+        },
+        'user_agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6 Build/SD1A.210817.036) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.61 Mobile Safari/537.36',
+        'referer': 'https://www.youtube.com/',
+        'http_headers': {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        }
     }
 
     audio_path = None
@@ -87,9 +119,10 @@ def extract_youtube(video_url):
             }
 
         # 2. Transcribe with Whisper
-        from model_loader import model
+        from model_loader import get_whisper_model
+        whisper_model = get_whisper_model()
         print(f"🎙️ Transcribing {job_id}: {metadata['title']}")
-        result = model.transcribe(audio_path, fp16=False)
+        result = whisper_model.transcribe(audio_path, fp16=False)
 
         return {
             "success": True,
@@ -103,10 +136,21 @@ def extract_youtube(video_url):
         }
 
     except Exception as e:
-        print(f"❌ YouTube extraction error ({job_id}): {str(e)}")
+        error_msg = str(e)
+        print(f"❌ YouTube extraction error ({job_id}): {error_msg}")
+        
+        # Add helpful tip for Render/Bot detection issues
+        if "Sign in to confirm you’re not a bot" in error_msg or "403" in error_msg:
+            error_msg = (
+                "YouTube bot detection blocked the request. "
+                "TIP: Since this is running on Render, YouTube has flagged the server IP. "
+                "To fix: Export your YouTube cookies using a 'Get cookies.txt' browser extension, "
+                "save it as 'youtube_cookies.txt' in the ml-service folder, and redeploy."
+            )
+            
         return {
             "success": False,
-            "error": str(e)
+            "error": error_msg
         }
     finally:
         # Aggressive cleanup of only this job's directory
