@@ -26,12 +26,18 @@ import doubtRoutes from './routes/doubt.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import aiUtilityRoutes from './routes/ai.routes.js';
 import youtubeRoutes from './routes/youtube.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 // Import WebSocket service
 import { initializeWebSocket } from './services/websocket.service.js';
 
 const app = express();
 const httpServer = createServer(app);
+
+// Increase server timeout to 20 minutes for long-running AI/ML tasks
+httpServer.timeout = 1200000;
+httpServer.keepAliveTimeout = 610000; // Slightly more than Axios timeout
+httpServer.headersTimeout = 620000;
 
 // Get allowed origins
 const defaultOrigins = [
@@ -145,6 +151,7 @@ app.use('/api/doubts', doubtRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiUtilityRoutes);
 app.use('/api/youtube', youtubeRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);

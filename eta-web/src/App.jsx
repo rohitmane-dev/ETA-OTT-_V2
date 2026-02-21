@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { SocketProvider } from './contexts/SocketContext';
 import Loader from './components/Loader';
 
 // Lazy Loaded Pages
@@ -16,6 +17,8 @@ const ManageCourseContent = lazy(() => import('./pages/faculty/ManageCourseConte
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
 const BranchResources = lazy(() => import('./pages/student/BranchResources'));
 const CourseResources = lazy(() => import('./pages/student/CourseResources'));
+const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage'));
+const AdminSignupPage = lazy(() => import('./pages/AdminSignupPage'));
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
@@ -59,6 +62,12 @@ function AppRoutes() {
             user.role === 'admin' ? <AdminDashboard /> :
               <Navigate to="/student/dashboard" replace />
         ) : <SignupPage />
+      } />
+      <Route path="/admin/login" element={
+        user && user.role === 'admin' ? <Navigate to="/admin/dashboard" replace /> : <AdminLoginPage />
+      } />
+      <Route path="/admin/signup" element={
+        user && user.role === 'admin' ? <Navigate to="/admin/dashboard" replace /> : <AdminSignupPage />
       } />
 
       {/* Protected Routes - Dashboard */}
@@ -152,24 +161,26 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <div className="min-h-screen bg-background text-foreground">
-            <Suspense fallback={<Loader />}>
-              <AppRoutes />
-            </Suspense>
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 3000,
-                style: {
-                  background: 'hsl(var(--card))',
-                  color: 'hsl(var(--card-foreground))',
-                  border: '1px solid hsl(var(--border))'
-                }
-              }}
-            />
-          </div>
-        </Router>
+        <SocketProvider>
+          <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <div className="min-h-screen bg-background text-foreground">
+              <Suspense fallback={<Loader />}>
+                <AppRoutes />
+              </Suspense>
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  duration: 3000,
+                  style: {
+                    background: 'hsl(var(--card))',
+                    color: 'hsl(var(--card-foreground))',
+                    border: '1px solid hsl(var(--border))'
+                  }
+                }}
+              />
+            </div>
+          </Router>
+        </SocketProvider>
       </AuthProvider>
     </ThemeProvider>
   );
