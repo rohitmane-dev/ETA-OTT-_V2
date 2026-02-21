@@ -9,6 +9,8 @@ import aiService from '../services/ai.service.js';
 import youtubeService from '../services/youtube.service.js';
 import { emitToCourse, emitToUser } from '../services/websocket.service.js';
 import { runNeo4jQuery } from '../config/neo4j.config.js';
+import Notification from '../models/Notification.model.js';
+import { sendNotification } from '../services/websocket.service.js';
 
 const router = express.Router();
 
@@ -17,7 +19,7 @@ const router = express.Router();
  */
 router.post('/ask', authenticate, attachUser, async (req, res) => {
     try {
-        const { query, selectedText, courseId, contentId, context, visualContext } = req.body;
+        let { query, selectedText, courseId, contentId, context, visualContext } = req.body;
         const studentId = req.dbUser._id;
 
         if (!query || !courseId) {
@@ -112,6 +114,11 @@ router.post('/ask', authenticate, attachUser, async (req, res) => {
                 groundingContext.transcriptSegment = fullTranscript.substring(0, 3500); // Robust fallback
             }
             enhancedContext = `STRICT_REGION_CONTEXT: ${JSON.stringify(groundingContext)}`;
+
+            // Rule 15: Enhance mentor visibility - Add transcript content to selectedText for video doubts
+            if (contentType === 'video' && groundingContext.transcriptSegment) {
+                selectedText = `${selectedText}\n\n[Extracted Video Content]: ${groundingContext.transcriptSegment}`;
+            }
         } else if (fullTranscript && !enhancedContext.includes(fullTranscript.substring(0, 50))) {
             // General content fallback
             const sample = fullTranscript.substring(0, 2000);
@@ -335,7 +342,28 @@ router.post('/:id/escalate', authenticate, attachUser, async (req, res) => {
         doubt.status = 'escalated';
         await doubt.save();
 
-        // Notify course faculty via WebSocket
+        // Notify course faculty via WebSocket and Database
+        const course = await Course.findById(doubt.courseId).populate('facultyIds');
+        if (course) {
+            for (const facultyId of course.facultyIds) {
+                const notification = await Notification.create({
+                    recipientId: facultyId,
+                    type: 'doubt_escalated',
+                    title: 'New Doubt Escalated',
+                    message: `${req.dbUser.profile.name} escalated a doubt in "${course.name}"`,
+                    metadata: {
+                        doubtId: doubt._id,
+                        courseId: course._id,
+                        query: doubt.query,
+                        selectedText: doubt.selectedText,
+                        aiResponse: doubt.aiResponse
+                    }
+                });
+                sendNotification(facultyId, notification);
+            }
+        }
+
+        // Keep the existing socket call for legacy support if needed, but sendNotification handles it better now
         emitToCourse(doubt.courseId, 'doubt:escalated', {
             doubtId: doubt._id,
             query: doubt.query,
@@ -370,7 +398,20 @@ router.post('/:id/answer', authenticate, attachUser, requireFaculty, async (req,
             await aiService.saveDoubtToGraph(doubt.query, answer, 100, mentorContext, doubt.contentId);
         }
 
-        // Notify student
+        // Notify student via WebSocket and Database
+        const notification = await Notification.create({
+            recipientId: doubt.studentId,
+            type: 'doubt_answered',
+            title: 'Doubt Answered',
+            message: `Your doubt "${doubt.query.substring(0, 30)}..." has been answered by a mentor.`,
+            metadata: {
+                doubtId: doubt._id,
+                answeredBy: req.dbUser._id
+            }
+        });
+        sendNotification(doubt.studentId, notification);
+
+        // Keep existing socket call
         emitToUser(doubt.studentId, 'doubt:answered', {
             doubtId: doubt._id,
             answer,
@@ -407,7 +448,7 @@ router.get('/escalated/:courseId', authenticate, attachUser, requireFaculty, asy
             status: 'escalated'
         })
             .populate('studentId', 'profile.name')
-            .sort({ createdAt: 1 });
+            .sort({ createdAt: -1 });
 
         res.json({ success: true, data: { doubts } });
     } catch (error) {

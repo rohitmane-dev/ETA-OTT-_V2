@@ -63,7 +63,7 @@ export default function CourseKnowledgeGraph({ courseId, isOpen, onClose }) {
 
     const getNodeColor = (type) => {
         const t = type?.toLowerCase();
-        if (t === 'content') return '#3b82f6'; // blue
+        if (['content', 'pdf', 'video', 'youtube', 'web', 'document', 'code'].includes(t)) return '#3b82f6'; // blue
         if (t === 'topic') return '#10b981';   // green
         if (t === 'concept') return '#8b5cf6'; // purple
         if (t === 'course') return '#f59e0b';  // amber
@@ -126,8 +126,8 @@ export default function CourseKnowledgeGraph({ courseId, isOpen, onClose }) {
                         <button
                             onClick={toggleLayout}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all duration-300 font-bold text-xs uppercase tracking-wider ${layoutMode === 'dag'
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]'
-                                    : 'bg-slate-800 text-slate-300 border-white/5 hover:border-primary/50'
+                                ? 'bg-primary text-white border-primary shadow-[0_0_15px_rgba(var(--primary-rgb),0.5)]'
+                                : 'bg-slate-800 text-slate-300 border-white/5 hover:border-primary/50'
                                 }`}
                         >
                             {layoutMode === 'dag' ? <GitGraph className="w-4 h-4" /> : <Box className="w-4 h-4" />}

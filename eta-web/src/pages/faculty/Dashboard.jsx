@@ -28,6 +28,7 @@ import toast from 'react-hot-toast';
 import apiClient from '../../api/axios.config';
 import Loader from '../../components/Loader';
 import ThemeToggle from '../../components/ThemeToggle';
+import NotificationButton from '../../components/NotificationButton';
 
 // Lazy Loaded Components
 const CreateInstitutionModal = lazy(() => import('../../components/faculty/CreateInstitutionModal'));
@@ -293,10 +294,7 @@ export default function FacultyDashboard() {
                                     />
                                 </div>
 
-                                <button className="relative p-2.5 hover:bg-secondary rounded-xl transition-colors">
-                                    <Bell className="w-5 h-5 text-muted-foreground" />
-                                    <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border-2 border-background"></span>
-                                </button>
+                                <NotificationButton />
 
                                 <button
                                     onClick={() => setActiveTab('profile')}
