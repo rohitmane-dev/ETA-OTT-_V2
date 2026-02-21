@@ -77,19 +77,20 @@ def extract_youtube(video_url):
         'writeautomaticsub': True,
         'subtitleslangs': ['en.*'],
         'skip_download': False,
+        'ignoreerrors': True,  # CRITICAL: Don't crash if subtitles are blocked (Error 429)
         # Updated to bypass aggressive bot detection
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'mweb'],
+                'player_client': ['ios', 'android', 'mweb'], # Added ios
                 'player_skip': ['webpage', 'configs'],
                 'skip': ['dash', 'hls']
             }
         },
-        'user_agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6 Build/SD1A.210817.036) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.61 Mobile Safari/537.36',
-        'referer': 'https://www.youtube.com/',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36', # Updated UA
+        'referer': 'https://www.google.com/', # Better referer
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Language': 'en-us,en;q=1.0',
             'Sec-Fetch-Mode': 'navigate',
         }
     }

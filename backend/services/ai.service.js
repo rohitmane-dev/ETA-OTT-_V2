@@ -295,7 +295,7 @@ export const saveToKnowledgeGraph = async (params) => {
             selectedText: selectedText || ''
         });
 
-        console.log(`✅ Resolution saved to Knowledge Graph (Confidence: ${confidence}%)`);
+        console.log(`Resolution saved to Knowledge Graph (Confidence: ${confidence}%)`);
         return true;
     } catch (error) {
         console.warn('Failed to save to Knowledge Graph:', error.message);

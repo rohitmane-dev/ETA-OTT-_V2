@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import apiClient from '../../api/axios.config';
 import Loader from '../../components/Loader';
 import ThemeToggle from '../../components/ThemeToggle';
+import NotificationButton from '../../components/NotificationButton';
 
 // Lazy Loaded Components
 const ProfileSection = lazy(() => import('../../components/ProfileSection'));
@@ -312,14 +313,11 @@ export default function StudentDashboard() {
 
                             <div className="header-actions-group flex items-center gap-2 sm:gap-3">
                                 <ThemeToggle />
-                                <div className="relative hidden lg:block">
+                                <div className="hidden lg:block relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                                     <input type="text" placeholder="Search courses..." className="input pl-10 w-48 xl:w-64 bg-secondary/50 border-none focus:ring-1 focus:ring-primary/30" />
                                 </div>
-                                <button className="p-2.5 bg-secondary/50 rounded-xl relative hover:bg-secondary transition-colors group">
-                                    <Bell className="w-5 h-5 group-hover:shake transition-opacity" />
-                                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-background"></span>
-                                </button>
+                                <NotificationButton />
                                 <button onClick={() => setShowJoinModal(true)} className="btn-primary flex items-center gap-2 px-4 py-2 text-sm">
                                     <Plus className="w-4 h-4" />
                                     <span className="hidden sm:inline">Join Branch</span>
