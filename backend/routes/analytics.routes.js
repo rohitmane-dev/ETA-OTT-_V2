@@ -2,8 +2,10 @@ import express from 'express';
 import Doubt from '../models/Doubt.model.js';
 import User from '../models/User.model.js';
 import Course from '../models/Course.model.js';
+import Content from '../models/Content.model.js';
 import mongoose from 'mongoose';
 import { authenticate, attachUser } from '../middleware/auth.middleware.js';
+import aiService from '../services/ai.service.js';
 
 const router = express.Router();
 
@@ -152,6 +154,136 @@ router.get('/faculty/:id', authenticate, attachUser, async (req, res) => {
             }
         });
     } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/**
+ * Get AI-Powered Difficulty Insights for Faculty
+ * Analyzes escalated doubts to identify topics and materials students struggle with
+ */
+router.get('/faculty/:id/difficulty-insights', authenticate, attachUser, async (req, res) => {
+    try {
+        const facultyId = new mongoose.Types.ObjectId(req.params.id);
+        const user = await User.findById(facultyId);
+        const branchIds = user?.branchIds || [];
+
+        // Get faculty's courses
+        const relevantCourseIds = await Course.find({
+            $or: [
+                { branchIds: { $in: branchIds } },
+                { facultyIds: facultyId }
+            ]
+        }).distinct('_id');
+
+        if (!relevantCourseIds || relevantCourseIds.length === 0) {
+            return res.json({
+                success: true,
+                data: {
+                    topics: [],
+                    materialInsights: [],
+                    overallSummary: 'No courses found for this faculty',
+                    stats: { totalEscalated: 0, coursesAffected: 0, avgConfidence: 0 }
+                }
+            });
+        }
+
+        // 1. Aggregate escalated doubts grouped by content
+        const escalatedByContent = await Doubt.aggregate([
+            {
+                $match: {
+                    courseId: { $in: relevantCourseIds },
+                    escalated: true
+                }
+            },
+            {
+                $group: {
+                    _id: { courseId: '$courseId', contentId: '$contentId' },
+                    queries: { $push: '$query' },
+                    count: { $sum: 1 },
+                    avgConfidence: { $avg: '$confidence' },
+                    latestAt: { $max: '$createdAt' }
+                }
+            },
+            { $sort: { count: -1 } },
+            { $limit: 20 }
+        ]);
+
+        // 2. Overall stats
+        const totalEscalated = await Doubt.countDocuments({
+            courseId: { $in: relevantCourseIds },
+            escalated: true
+        });
+
+        const coursesAffected = await Doubt.distinct('courseId', {
+            courseId: { $in: relevantCourseIds },
+            escalated: true
+        });
+
+        const avgConfData = await Doubt.aggregate([
+            { $match: { courseId: { $in: relevantCourseIds }, escalated: true } },
+            { $group: { _id: null, avg: { $avg: '$confidence' } } }
+        ]);
+
+        // 3. Enrich with course and content names
+        const contentIds = escalatedByContent
+            .map(e => e._id.contentId)
+            .filter(Boolean);
+        const courseIds = escalatedByContent.map(e => e._id.courseId);
+
+        const [contents, courses] = await Promise.all([
+            Content.find({ _id: { $in: contentIds } }).select('title type').lean(),
+            Course.find({ _id: { $in: courseIds } }).select('name code').lean()
+        ]);
+
+        const contentMap = {};
+        contents.forEach(c => { contentMap[c._id.toString()] = c; });
+        const courseMap = {};
+        courses.forEach(c => { courseMap[c._id.toString()] = c; });
+
+        // 4. Build data for AI analysis
+        const doubtsData = escalatedByContent.map(group => ({
+            courseName: courseMap[group._id.courseId?.toString()]?.name || 'Unknown Course',
+            contentTitle: group._id.contentId
+                ? (contentMap[group._id.contentId.toString()]?.title || 'General Query')
+                : 'General Query',
+            contentType: group._id.contentId
+                ? (contentMap[group._id.contentId.toString()]?.type || 'unknown')
+                : 'unknown',
+            queries: group.queries,
+            count: group.count,
+            avgConfidence: Math.round(group.avgConfidence || 0)
+        }));
+
+        // 5. AI-powered topic analysis
+        let aiInsights = { topics: [], materialInsights: [], overallSummary: '' };
+        if (doubtsData.length > 0) {
+            aiInsights = await aiService.analyzeDifficultyTopics(doubtsData);
+        }
+
+        // 6. Build raw material breakdown (non-AI fallback data)
+        const materialBreakdown = doubtsData.map(d => ({
+            title: d.contentTitle,
+            courseName: d.courseName,
+            type: d.contentType,
+            escalationCount: d.count,
+            avgConfidence: d.avgConfidence
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                ...aiInsights,
+                materialBreakdown,
+                stats: {
+                    totalEscalated,
+                    coursesAffected: coursesAffected.length,
+                    avgConfidence: Math.round(avgConfData[0]?.avg || 0)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Difficulty insights error:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 });

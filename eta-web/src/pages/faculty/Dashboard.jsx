@@ -22,7 +22,8 @@ import {
     Key,
     Video,
     Trash2,
-    User
+    User,
+    AlertTriangle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import apiClient from '../../api/axios.config';
@@ -37,6 +38,7 @@ const InstitutionCard = lazy(() => import('../../components/faculty/InstitutionC
 const FacultyDoubtManager = lazy(() => import('../../components/faculty/FacultyDoubtManager'));
 const ProfileSection = lazy(() => import('../../components/ProfileSection'));
 const FacultyAnalytics = lazy(() => import('../../components/faculty/FacultyAnalytics'));
+const DifficultyInsights = lazy(() => import('../../components/faculty/DifficultyInsights'));
 
 export default function FacultyDashboard() {
     const { user, logout } = useAuth();
@@ -60,6 +62,7 @@ export default function FacultyDashboard() {
         { id: 'content', label: 'Content', icon: Upload },
         { id: 'doubts', label: 'Doubts', icon: MessageSquare },
         { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+        { id: 'insights', label: 'Difficulty Insights', icon: AlertTriangle },
         { id: 'profile', label: 'Profile', icon: User },
     ];
 
@@ -627,6 +630,21 @@ export default function FacultyDashboard() {
                             </div>
                             <Suspense fallback={<Loader />}>
                                 <FacultyAnalytics institutions={institutions} courses={courses} />
+                            </Suspense>
+                        </div>
+                    )}
+
+                    {activeTab === 'insights' && (
+                        <div className="space-y-6">
+                            <div className="header-dashboard">
+                                <h2 className="text-2xl font-bold truncate">Difficulty Insights</h2>
+                                <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-widest bg-secondary px-3 py-1.5 rounded-lg border border-border/50">
+                                    <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                                    AI Powered
+                                </div>
+                            </div>
+                            <Suspense fallback={<Loader />}>
+                                <DifficultyInsights />
                             </Suspense>
                         </div>
                     )}

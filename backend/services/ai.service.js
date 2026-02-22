@@ -528,10 +528,103 @@ export const saveDoubtToGraph = async (query, answer, confidence, context = '', 
     }
 };
 
+/**
+ * Analyze escalated doubt queries to identify difficulty topics.
+ * Uses Groq LLM to cluster queries into pain-point topics with recommendations.
+ * 
+ * @param {Array} doubtsData - Array of { courseName, contentTitle, queries: string[], count }
+ * @returns {Object} { topics: [...], materialInsights: [...] }
+ */
+const analyzeDifficultyTopics = async (doubtsData) => {
+    if (!doubtsData || doubtsData.length === 0) {
+        return { topics: [], materialInsights: [] };
+    }
+
+    // Build a concise summary of all queries grouped by material
+    const querySummary = doubtsData.map(group => {
+        const sampleQueries = group.queries.slice(0, 10).join('\n  - ');
+        return `Material: "${group.contentTitle}" (Course: ${group.courseName}, ${group.count} escalations)\n  Queries:\n  - ${sampleQueries}`;
+    }).join('\n\n');
+
+    const systemPrompt = `You are an educational analytics AI. Analyze student doubt queries that were escalated to faculty (meaning the AI tutor could not answer them confidently). Identify recurring difficulty topics and provide actionable recommendations.
+
+RESPOND ONLY WITH VALID JSON, no markdown, no code fences. Use this exact schema:
+{
+  "topics": [
+    {
+      "name": "Topic Name",
+      "severity": "high" | "medium" | "low",
+      "escalationCount": <number>,
+      "avgConfidence": <number 0-100>,
+      "description": "Brief description of what students struggle with",
+      "recommendation": "Actionable suggestion for faculty to improve materials",
+      "relatedMaterials": ["material title 1", "material title 2"]
+    }
+  ],
+  "materialInsights": [
+    {
+      "title": "Material Title",
+      "courseName": "Course Name",
+      "escalationCount": <number>,
+      "topIssue": "Main difficulty students face with this material",
+      "suggestion": "Specific suggestion to improve or replace this material"
+    }
+  ],
+  "overallSummary": "A 1-2 sentence summary of the biggest pain points across all courses"
+}
+
+Rules:
+- Identify 3-7 distinct difficulty topics by clustering similar queries
+- Rank severity based on frequency and how fundamental the topic is
+- Recommendations must be specific and actionable (not generic)
+- Material insights should focus on the most problematic materials only (top 5)`;
+
+    try {
+        const apiKey = GROQ_API_KEY;
+        if (!apiKey) {
+            console.warn('No Groq API key available for difficulty analysis');
+            return { topics: [], materialInsights: [], overallSummary: 'API key not configured' };
+        }
+
+        const response = await axios.post(GROQ_API_URL, {
+            model: GROQ_MODEL,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Here are the escalated student doubt queries grouped by material:\n\n${querySummary}\n\nAnalyze these and provide structured difficulty insights.` }
+            ],
+            temperature: 0.3,
+            max_tokens: 2000,
+            response_format: { type: 'json_object' }
+        }, {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
+        });
+
+        const content = response.data.choices?.[0]?.message?.content;
+        if (!content) {
+            return { topics: [], materialInsights: [], overallSummary: 'No response from AI' };
+        }
+
+        const parsed = JSON.parse(content);
+        return {
+            topics: parsed.topics || [],
+            materialInsights: parsed.materialInsights || [],
+            overallSummary: parsed.overallSummary || ''
+        };
+    } catch (error) {
+        console.error('Difficulty topic analysis failed:', error.message);
+        return { topics: [], materialInsights: [], overallSummary: 'Analysis temporarily unavailable' };
+    }
+};
+
 export default {
     searchExistingDoubts,
     askGroq,
     saveDoubtToGraph,
     searchKnowledgeGraph,
-    saveToKnowledgeGraph
+    saveToKnowledgeGraph,
+    analyzeDifficultyTopics
 };
